@@ -1,151 +1,202 @@
 # create-react-dotnet-app
 
+[![npm version](https://img.shields.io/npm/v/create-react-dotnet-app.svg?color=CB3837&logo=npm)](https://www.npmjs.com/package/create-react-dotnet-app)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![GitHub](https://img.shields.io/badge/GitHub-nghiemledo%2Fcreate--react--dotnet--app-181717?logo=github&logoColor=white)](https://github.com/nghiemledo/create-react-dotnet-app)
 ![Node.js](https://img.shields.io/badge/Node.js-%5E22.13%20%7C%7C%20%3E%3D23.5-339933?logo=nodedotjs&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)
+
+**Frontend:**
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)
 ![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss&logoColor=white)
+![shadcn/ui](https://img.shields.io/badge/shadcn%2Fui-Radix-000000?logo=shadcnui&logoColor=white)
 ![TanStack Query](https://img.shields.io/badge/TanStack_Query-5-FF4154?logo=reactquery&logoColor=white)
 ![Zustand](https://img.shields.io/badge/Zustand-5-443E38)
+![React Router](https://img.shields.io/badge/React_Router-7-CA4245?logo=reactrouter&logoColor=white)
+![React Hook Form](https://img.shields.io/badge/React_Hook_Form-7-EC5990?logo=reacthookform&logoColor=white)
+![Zod](https://img.shields.io/badge/Zod-4-3E67B1?logo=zod&logoColor=white)
+
+**Backend:**
 ![.NET](https://img.shields.io/badge/.NET-9-512BD4?logo=dotnet&logoColor=white)
 ![ASP.NET Core](https://img.shields.io/badge/ASP.NET_Core-Web_API-512BD4?logo=dotnet&logoColor=white)
+![EF Core](https://img.shields.io/badge/EF_Core-9-512BD4?logo=dotnet&logoColor=white)
 ![SQL Server](https://img.shields.io/badge/SQL_Server-LocalDB-CC2927?logo=microsoftsqlserver&logoColor=white)
+![JWT](https://img.shields.io/badge/Auth-JWT-000000?logo=jsonwebtokens&logoColor=white)
+![Swagger](https://img.shields.io/badge/Swagger-OpenAPI-85EA2D?logo=swagger&logoColor=black)
+
+**Tooling:**
 ![pnpm](https://img.shields.io/badge/pnpm-supported-F69220?logo=pnpm&logoColor=white)
 ![npm](https://img.shields.io/badge/npm-supported-CB3837?logo=npm&logoColor=white)
+![ESLint](https://img.shields.io/badge/ESLint-flat_config-4B32C3?logo=eslint&logoColor=white)
+![Vitest](https://img.shields.io/badge/Vitest-tested-6E9F18?logo=vitest&logoColor=white)
 
-Scaffold a full-stack project with a **React 19 + Vite + TypeScript** client and an **ASP.NET Core (.NET 9) Clean Architecture** API.
+An interactive CLI to instantly scaffold production-ready full-stack applications with **React 19 (Vite, TypeScript, Tailwind CSS v4, Shadcn/ui)** and **ASP.NET Core (.NET 9) Clean Architecture Web API**.
 
-The template is bundled inside the package, so generating a project needs no access to the (private) source repository.
+The starter template is self-contained directly inside the npm package — zero network requests or GitHub dependencies at generation time.
 
-> **Status:** source code is on GitHub at [nghiemledo/create-react-dotnet-app](https://github.com/nghiemledo/create-react-dotnet-app). The package is not yet published to npm, so `npx create-react-dotnet-app` will not work until the first release.
+---
 
-## Usage
+## ⚡ Quick Start
+
+You can generate a new application interactively with a single command:
 
 ```bash
 npx create-react-dotnet-app my-app
-```
 
-Run interactively (with or without a name), the CLI asks, in order:
 
-1. **Project name**, if not given. Re-asked until valid.
-2. **Frontend package manager**. Only supported managers that are installed are offered: pnpm, which uses the template lockfile, and npm. The question is skipped if only one is installed.
-3. **Install frontend dependencies now?**
-4. **Initialize a new Git repository?** Not asked if Git is missing or the destination is already inside a repository.
-
-Every question is answered before any file is written, so Ctrl+C at a prompt leaves nothing behind.
-
-In CI or scripts, pass options and add `--yes`. Anything not specified defaults to: pnpm if installed, otherwise npm; install dependencies; initialize Git.
+Or run without arguments to launch the guided prompt:
 
 ```bash
-npx create-react-dotnet-app my-app --yes --pm npm --no-git
-```
+npx create-react-dotnet-app
 
-| Option | Description |
-| --- | --- |
-| `[project-name]` | Directory to create; a path is also accepted. Its last segment is the project name: lowercase letters, digits and single hyphens (e.g. `my-app` becomes the .NET name `MyApp`). |
-| `--pm <pnpm\|npm>` | Frontend package manager. With npm, the pnpm lockfile is not copied. |
-| `--install` / `--no-install` | Install frontend dependencies, or skip it. `--install` fails early if the package manager is missing. |
-| `--git` / `--no-git` | Initialize a repository with an initial commit, or skip it. `--git` fails early if Git is missing. |
-| `--display-name <name>` | Human-readable application name (default: the project name). |
-| `-y, --yes` | Never prompt. |
 
-### Safety
+### Non-Interactive / CI Usage
 
-- **Existing directories:** an existing non-empty directory is never written to silently. Non-interactively, the CLI stops. Interactively, you can choose another name, cancel, or add the project to the directory. Adding is offered only when none of the project's files already exist there, and files are created with exclusive-create, so nothing is overwritten.
-- **Rollback:** if generation fails or is cancelled (Ctrl+C), only the files and directories this run created are removed.
-- **Template source:** the template is bundled; nothing is downloaded, and no `.git` metadata is copied.
-- **Subprocesses:** only fixed commands run: `pnpm install --frozen-lockfile` or `npm install` in `client/`, then `git init`, `git add -A` and `git commit`. They run without a shell, and user input reaches them only as the working directory. No database commands, migrations or `dotnet` commands are run.
-- **Failed steps:** if installation or Git fails, or is interrupted, the project is kept. The summary shows what completed and the exact command to finish each step, and the CLI exits with code 1.
-
-### What gets generated
-
-- `server/<Name>.sln` with `<Name>.Api`, `.Application`, `.Domain`, `.Infrastructure` and `.Common` projects. Namespaces, the CORS policy, the Swagger title and the database name (`<Name>Db`) are renamed.
-- `client/`, with the package name `<project-name>-client`, localStorage keys prefixed with `<project-name>-`, the display name in the page title and `.env`, and `client/.env` created from `.env.example`.
-- A random JWT signing key per project in `server/<Name>.Api/appsettings.json`. The same key is used by the `Jwt` and `JwtTokenSettings` sections, as the API requires.
-- A random password for the seeded development accounts, written into `DataSeeder.cs` and **printed once** by the CLI.
-
-### Requirements for generated projects
-
-- Node.js `^20.19`, `^22.13` or `>=24` (Vite 8 / ESLint 10). The CLI itself needs Node `^22.13` or `>=23.5` (the floor set by `@inquirer/prompts` and `commander`).
-- .NET SDK 9 or later.
-- SQL Server. The default connection string uses LocalDB (Windows only). On macOS/Linux set `ConnectionStrings__DefaultConnection`.
-
-## Development
+Pass options with `--yes` (`-y`) to skip all interactive prompts:
 
 ```bash
+npx create-react-dotnet-app my-app --yes --pm pnpm --install --git
+
+
+#### Available CLI Flags
+
+| Flag | Description | Default |
+| --- | --- | --- |
+| `[project-name]` | Target folder & app identifier (e.g. `my-app` → `MyApp`) | Interactive prompt |
+| `--pm <manager>` | Frontend package manager: `pnpm` or `npm` | `pnpm` if installed, otherwise `npm` |
+| `--install` / `--no-install` | Install frontend dependencies immediately | `--install` |
+| `--git` / `--no-git` | Initialize a Git repository with an initial commit | `--git` |
+| `--display-name <name>` | Custom human-readable brand name for the UI | The project name |
+| `-y, --yes` | Skip all prompts and use defaults | `false` |
+
+---
+
+## 🚀 Getting Started with Your New App
+
+Once scaffolded, launch both client and server:
+
+### 1. Start the Backend (.NET 9 Web API)
+
+```bash
+cd my-app/server
+dotnet dev-certs https --trust   # first time only
+dotnet run --project MyApp.Api --launch-profile https
+```
+
+* **Swagger UI:** `https://localhost:7001/swagger` (or `http://localhost:5058/swagger`)
+* **Default Database:** Configured for SQL Server LocalDB by default. On first start the API creates and seeds the database. On Linux/macOS, point `ConnectionStrings:DefaultConnection` in `appsettings.json` (or the `ConnectionStrings__DefaultConnection` environment variable) at a SQL Server instance.
+* **Admin Login:** The CLI generates a unique random password for your local seeded development account and prints it in the terminal summary.
+
+### 2. Start the Frontend (React 19 + Vite)
+
+```bash
+cd my-app/client
+# If not installed during setup:
+pnpm install # or npm install
+
+# Start Vite dev server:
+pnpm dev     # or npm run dev
+
+
+* **App URL:** `http://localhost:5173`
+
+---
+
+## 📦 What's Included in the Box
+
+### Frontend
+
+* **Framework:** React 19 + TypeScript + Vite 8
+* **Styling:** Tailwind CSS v4 + Shadcn UI (accessible primitives with Radix UI)
+* **State & Server Cache:** Zustand 5 & TanStack Query v5
+* **Icons & Forms:** Lucide React, React Hook Form, Zod validation
+* **Zero-Config DX:** Path alias `@/*` preconfigured, pre-wired API client with auto JWT attachment
+
+### Backend
+
+* **Framework:** ASP.NET Core Web API (.NET 9)
+* **Architecture:** Clean Architecture (`Api`, `Application`, `Domain`, `Infrastructure`, `Common`)
+* **Security:** Fully configured JWT Authentication & Refresh Token flow with auto-generated signing keys
+* **Data Access:** Entity Framework Core (SQL Server); the database is created on first run (`EnsureCreated`) and seeded with sample data. No migrations are included, and the CLI never touches a database.
+* **Documentation:** Interactive Swagger / OpenAPI documentation with JWT Bearer support
+
+---
+
+## 🛡️ Built-in Safety & Reliability
+
+* **Non-Destructive:** Existing non-empty directories are never overwritten silently.
+* **Rollback:** If writing the project files fails or is aborted (`Ctrl + C`), only the files created by that run are removed. If a later step (dependency install or Git) fails, the files are kept and the CLI prints the command to finish that step.
+* **Air-Gapped Generation:** The template snapshot is bundled locally within the package.
+* **Secure Process Execution:** Spawns native child processes without shell wrappers, eliminating command-injection risks.
+* **Isolated Secrets:** Unique, cryptographically secure JWT secrets and local admin credentials are generated on-the-fly per project.
+
+---
+
+## 💻 Prerequisites
+
+| Tool | Minimum Version | Notes |
+| --- | --- | --- |
+| **Node.js** | `^22.13.0` or `>=23.5.0` | Required by the CLI and modern Vite / ESLint |
+| **.NET SDK** | `9.0+` | Required to build and run the backend Web API |
+| **Package Manager** | `pnpm 9+` or `npm 10+` | `pnpm` is recommended |
+| **Database** | SQL Server / LocalDB / Docker | LocalDB works out-of-the-box on Windows |
+
+---
+
+## 🛠️ CLI Development & Contributing
+
+### Local Setup
+
+```bash
+git clone https://github.com/nghiemledo/create-react-dotnet-app.git
+cd create-react-dotnet-app
 npm install
-npm run check        # typecheck + tests + build
-node dist/index.js my-app --no-install --no-git
-```
 
-| Script | Purpose |
-| --- | --- |
-| `npm run build` | Compile `src/` to `dist/` (the `bin` entry is `dist/index.js`). Also runs on `npm pack`/`npm publish` via `prepack`. |
-| `npm run typecheck` | Type-check `src/`, `scripts/` and `tests/`. |
-| `npm test` | Vitest: naming, sanitization rules, generation and rollback, the full CLI flow (scripted prompts, fake subprocesses), real subprocess handling, and credential scans. |
-| `npm run sync-template` | Refresh `templates/default` from the source repository (see below). |
+# Run typechecks, tests, and build
+npm run check
 
-Inspect exactly what would be published with `npm pack --dry-run`.
 
-### Layout
+### Local Testing
+
+Test the CLI locally without publishing:
+
+```bash
+# Compile, then run the built CLI (creates ../test-app, outside this repository)
+npm run build
+node dist/index.js ../test-app --no-install --no-git
+
+# Test packing dry-run (verifies bundle size and excluded artifacts)
+npm pack --dry-run
+
+
+### Project Structure
 
 ```text
 src/
-  index.ts          entry point: maps errors and cancellation to exit codes
-  cli.ts            options and orchestration (questions -> generate -> install -> git -> summary)
-  questions.ts      every interactive decision; nothing is written until all are answered
-  prompter.ts       @inquirer/prompts adapter (tests use a scripted prompter)
-  generate.ts       plan, conflict check, copy/rename/inject secrets, rollback
-  replacements.ts   audited identifier transformations
-  steps.ts          frontend install and git init, with recovery instructions
-  process.ts        shell-free subprocess runner and tool probes
-  prerequisites.ts  node / dotnet / package manager / git detection
-  summary.ts        result summary and next steps
-scripts/            template sync + sanitization rules (not published)
-templates/default/  sanitized template snapshot (published; generated, do not hand-edit)
-templates/default.source.json  commit the snapshot was taken from
-tests/
-```
+├── index.ts          # Entry point & error/cancellation handler
+├── cli.ts            # Commander setup and step orchestrator
+├── questions.ts      # Interactive prompt workflow
+├── generate.ts       # Template copier, identifier renamer & secret injector
+├── replacements.ts   # C# namespace & React identifier transformation logic
+└── steps.ts          # Safe subprocess runners (pnpm install, git init)
+templates/default/    # Sanitized template snapshot distributed via npm
+scripts/              # Automated template sync & secret redaction scripts
 
-### Dependencies
 
-| Package | Why |
-| --- | --- |
-| `commander` | Argument parsing, `--help`/`--version`, option validation. |
-| `@inquirer/prompts` | Interactive prompts. |
-| `cross-spawn` | Runs `pnpm`/`npm`/`git` (and the `dotnet --list-sdks` probe) reliably on Windows (`.cmd` shims) without `shell: true`. |
-| `typescript`, `@types/*` (dev) | Compilation and types. |
-| `vitest` (dev) | Test runner with native TypeScript support. |
-| `tsx` (dev) | Runs the TypeScript sync script without a build step. |
+### Updating the Template Snapshot
 
-## Updating the template
-
-`templates/default` is a generated snapshot of the private `react-dotnet-boilerplate` repository. Fix application code **upstream**, then re-sync. Never edit the snapshot by hand.
+The starter template is mirrored from `react-dotnet-boilerplate`. To pull upstream updates:
 
 ```bash
-# Preview: lists excluded files and applied sanitization rules, writes nothing
-npm run sync-template -- --source ../react-dotnet-boilerplate --ref v1.2.0 --dry-run
-
-# Apply
-npm run sync-template -- --source ../react-dotnet-boilerplate --ref v1.2.0
-git diff --stat templates/
+npm run sync-template -- --source ../react-dotnet-boilerplate --ref <git-tag-or-branch>
 npm run check
 ```
 
-On PowerShell, quote the separator: `npm run sync-template '--' --source ...`.
+Only committed files at the given ref are copied, and secrets are replaced with per-project tokens. In PowerShell, quote the separator: `npm run sync-template '--' --source ...`.
 
-How the sync works (`scripts/sync-template.ts`, rules in `scripts/template-rules.ts`):
+---
 
-1. Reads only files **tracked at the given ref** (default `HEAD`). Uncommitted changes and ignored files (`.env`, `bin/`, `obj/`, `node_modules/`, `.vs/`, `*.csproj.user`) can never enter the template. A deny-list excludes them again in case they are ever committed.
-2. Replaces the committed JWT signing keys and the seeded user password with the tokens `__JWT_SIGNING_KEY__` and `__SEED_USER_PASSWORD__`. Removes the prefilled login credentials and the unrelated `ENGKING` `.gitignore` entry. Redacts those values from Markdown docs.
-3. Fails if any secret value from the source still appears anywhere in the output. Error messages show file paths, never the values.
-4. Fails with a drift error if a file or pattern the rules depend on no longer exists upstream, so rule changes are explicit.
-5. Renames `.gitignore` to `_gitignore` (npm drops `.gitignore` from packages). The CLI renames it back.
-6. Records the source commit in `templates/default.source.json`.
+## 📄 License
 
-Prefer syncing from a tag so each CLI release maps to a known template version.
-
-## License
-
-[MIT](LICENSE). The bundled template is covered by the same license.
+This project is licensed under the [MIT License](LICENSE). Generated applications include the same MIT `LICENSE` and are free to use in personal or commercial projects, as long as the copyright notice is kept.
