@@ -1,10 +1,24 @@
 # create-react-dotnet-app
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Node.js](https://img.shields.io/badge/Node.js-%5E22.13%20%7C%7C%20%3E%3D23.5-339933?logo=nodedotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss&logoColor=white)
+![TanStack Query](https://img.shields.io/badge/TanStack_Query-5-FF4154?logo=reactquery&logoColor=white)
+![Zustand](https://img.shields.io/badge/Zustand-5-443E38)
+![.NET](https://img.shields.io/badge/.NET-9-512BD4?logo=dotnet&logoColor=white)
+![ASP.NET Core](https://img.shields.io/badge/ASP.NET_Core-Web_API-512BD4?logo=dotnet&logoColor=white)
+![SQL Server](https://img.shields.io/badge/SQL_Server-LocalDB-CC2927?logo=microsoftsqlserver&logoColor=white)
+![pnpm](https://img.shields.io/badge/pnpm-supported-F69220?logo=pnpm&logoColor=white)
+![npm](https://img.shields.io/badge/npm-supported-CB3837?logo=npm&logoColor=white)
+
 Scaffold a full-stack project with a **React 19 + Vite + TypeScript** client and an **ASP.NET Core (.NET 9) Clean Architecture** API.
 
 The template is bundled inside the package, so generating a project needs no access to the (private) source repository.
 
-> **Status:** not published yet. See [Before publishing](#before-publishing).
+> **Status:** source code is on GitHub at [nghiemledo/create-react-dotnet-app](https://github.com/nghiemledo/create-react-dotnet-app). The package is not yet published to npm, so `npx create-react-dotnet-app` will not work until the first release.
 
 ## Usage
 
@@ -135,7 +149,3 @@ Prefer syncing from a tag so each CLI release maps to a known template version.
 ## License
 
 [MIT](LICENSE). The bundled template is covered by the same license.
-
-## Before publishing
-
-- Create the GitHub repository named in `package.json` and push.
