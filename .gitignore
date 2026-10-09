@@ -1,0 +1,35 @@
+# Build output
+dist/
+*.tsbuildinfo
+
+# Dependencies
+node_modules/
+
+# Packed tarballs (npm pack)
+*.tgz
+
+# Test output
+coverage/
+
+# Temporary template sync output
+templates/.sync-*/
+
+# Environment variables & credentials
+.env
+.env.local
+.env.*.local
+.npmrc
+*.pem
+*.pfx
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editors / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db

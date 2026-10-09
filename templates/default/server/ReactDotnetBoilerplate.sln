@@ -1,0 +1,46 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.12.35521.163 d17.12
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ReactDotnetBoilerplate.Common", "ReactDotnetBoilerplate.Common\ReactDotnetBoilerplate.Common.csproj", "{A59FF96B-28BD-4BCE-B34C-D371A54BA968}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ReactDotnetBoilerplate.Domain", "ReactDotnetBoilerplate.Domain\ReactDotnetBoilerplate.Domain.csproj", "{C89221B1-0A02-4624-B3B8-3E32A0401064}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ReactDotnetBoilerplate.Infrastructure", "ReactDotnetBoilerplate.Infrastructure\ReactDotnetBoilerplate.Infrastructure.csproj", "{982D00AF-B816-404C-AF1A-9596B9E9BE76}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ReactDotnetBoilerplate.Application", "ReactDotnetBoilerplate.Application\ReactDotnetBoilerplate.Application.csproj", "{B7F5E115-984C-485D-A1BC-D8020047E085}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ReactDotnetBoilerplate.Api", "ReactDotnetBoilerplate.Api\ReactDotnetBoilerplate.Api.csproj", "{5471EA84-381D-42A5-8F21-7ADB089F9C9A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A59FF96B-28BD-4BCE-B34C-D371A54BA968}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A59FF96B-28BD-4BCE-B34C-D371A54BA968}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A59FF96B-28BD-4BCE-B34C-D371A54BA968}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A59FF96B-28BD-4BCE-B34C-D371A54BA968}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C89221B1-0A02-4624-B3B8-3E32A0401064}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C89221B1-0A02-4624-B3B8-3E32A0401064}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C89221B1-0A02-4624-B3B8-3E32A0401064}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C89221B1-0A02-4624-B3B8-3E32A0401064}.Release|Any CPU.Build.0 = Release|Any CPU
+		{982D00AF-B816-404C-AF1A-9596B9E9BE76}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{982D00AF-B816-404C-AF1A-9596B9E9BE76}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{982D00AF-B816-404C-AF1A-9596B9E9BE76}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{982D00AF-B816-404C-AF1A-9596B9E9BE76}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B7F5E115-984C-485D-A1BC-D8020047E085}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B7F5E115-984C-485D-A1BC-D8020047E085}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B7F5E115-984C-485D-A1BC-D8020047E085}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B7F5E115-984C-485D-A1BC-D8020047E085}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5471EA84-381D-42A5-8F21-7ADB089F9C9A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5471EA84-381D-42A5-8F21-7ADB089F9C9A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5471EA84-381D-42A5-8F21-7ADB089F9C9A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5471EA84-381D-42A5-8F21-7ADB089F9C9A}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

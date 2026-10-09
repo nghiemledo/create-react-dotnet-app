@@ -1,0 +1,55 @@
+{
+  "name": "create-react-dotnet-app",
+  "version": "0.1.0",
+  "description": "Scaffold a full-stack React + ASP.NET Core (.NET 9) project from a bundled template.",
+  "license": "MIT",
+  "author": "Nghiem Le <nghiemledo@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nghiemledo/create-react-dotnet-app.git"
+  },
+  "type": "module",
+  "bin": {
+    "create-react-dotnet-app": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "templates/default"
+  ],
+  "engines": {
+    "node": "^22.13.0 || >=23.5.0"
+  },
+  "keywords": [
+    "create",
+    "scaffold",
+    "template",
+    "react",
+    "dotnet",
+    "aspnetcore"
+  ],
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run lint && npm test && npm run build",
+    "sync-template": "tsx scripts/sync-template.ts",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^8.7.3",
+    "commander": "^15.0.0",
+    "cross-spawn": "^7.0.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/cross-spawn": "^6.0.6",
+    "@types/node": "^22.20.5",
+    "eslint": "^9.39.5",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0",
+    "typescript-eslint": "^8.71.1",
+    "vitest": "^5.0.3"
+  }
+}
