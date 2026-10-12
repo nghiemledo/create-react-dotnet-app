@@ -1,6 +1,13 @@
 import path from 'node:path';
+import { DATABASES, DEFAULT_DATABASE, SUPPORTED_DATABASES, type Database } from './databases.js';
 import { CancelledError, CliError } from './errors.js';
-import { inspectDestination, nonEmptyDirectoryMessage, planProject, type DestinationInspection } from './generate.js';
+import {
+  inspectDestination,
+  nonEmptyDirectoryMessage,
+  planProject,
+  type DestinationInspection,
+  type PlannedFile,
+} from './generate.js';
 import { log } from './log.js';
 import { projectNameFromDirectory, toPascalCase, validateProjectName } from './naming.js';
 import { PACKAGE_MANAGERS, type PackageManager } from './package-managers.js';
@@ -10,6 +17,7 @@ import type { Prompter } from './prompter.js';
 
 export interface GivenOptions {
   directory?: string;
+  database?: Database;
   packageManager?: PackageManager;
   /** `undefined` means "ask" (interactive) or "yes" (non-interactive). */
   install?: boolean;
@@ -20,6 +28,7 @@ export interface Answers {
   targetDir: string;
   projectName: string;
   allowNonEmpty: boolean;
+  database: Database;
   packageManager: PackageManager;
   install: boolean;
   installSkipReason?: string;
@@ -33,6 +42,7 @@ export interface QuestionContext {
   prompter: Prompter;
   tools: Tools;
   templateDir: string;
+  databasesDir?: string;
   probe: ToolProbe;
 }
 
@@ -40,20 +50,54 @@ type ExistingDirectoryAction = 'rename' | 'merge' | 'cancel';
 
 /**
  * Resolves every decision before any file is written, so cancelling at a prompt never leaves files behind.
- * Order: project name -> package manager -> install -> git.
+ * Order: project name -> database -> package manager -> install -> git.
  */
 export async function collectAnswers(context: QuestionContext): Promise<Answers> {
   const destination = await resolveDestination(context);
+  const database = await chooseDatabase(context);
   const packageManager = await choosePackageManager(context);
   const install = await decideInstall(context, packageManager);
   const git = await decideGit(context, destination.targetDir);
-  return { ...destination, packageManager, ...install, ...git };
+  return { ...destination, database, packageManager, ...install, ...git };
+}
+
+async function chooseDatabase({ given, interactive, prompter }: QuestionContext): Promise<Database> {
+  if (given.database) {
+    return given.database;
+  }
+  if (!interactive) {
+    return DEFAULT_DATABASE;
+  }
+  return prompter.select<Database>({
+    message: 'Database:',
+    choices: SUPPORTED_DATABASES.map((database) => ({ name: DATABASES[database].promptLabel, value: database })),
+    default: DEFAULT_DATABASE,
+  });
+}
+
+/** The database is chosen after the destination, so conflicts are checked against every possible project file. */
+async function planAllVariants(context: QuestionContext, pascalName: string): Promise<PlannedFile[]> {
+  const byDestination = new Map<string, PlannedFile>();
+  for (const database of SUPPORTED_DATABASES) {
+    // pnpm's plan is a superset of npm's (it includes the lockfile).
+    const plan = await planProject({
+      templateDir: context.templateDir,
+      databasesDir: context.databasesDir,
+      pascalName,
+      packageManager: 'pnpm',
+      database,
+    });
+    for (const file of plan) {
+      byDestination.set(file.destinationPath, file);
+    }
+  }
+  return [...byDestination.values()];
 }
 
 async function resolveDestination(
   context: QuestionContext,
 ): Promise<Pick<Answers, 'targetDir' | 'projectName' | 'allowNonEmpty'>> {
-  const { given, interactive, prompter, templateDir } = context;
+  const { given, interactive, prompter } = context;
   let directory = given.directory?.trim();
 
   for (;;) {
@@ -86,8 +130,7 @@ async function resolveDestination(
       continue;
     }
 
-    // pnpm's plan is a superset of npm's (it includes the lockfile), so it catches every possible conflict.
-    const plan = await planProject(templateDir, toPascalCase(projectName), 'pnpm');
+    const plan = await planAllVariants(context, toPascalCase(projectName));
     let inspection: DestinationInspection;
     try {
       inspection = await inspectDestination(targetDir, plan);

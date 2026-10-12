@@ -34,14 +34,14 @@ namespace ReactDotnetBoilerplate.Infrastructure.DbContexts
             var added = ChangeTracker.Entries<IAuditableEntity>().Where(E => E.State == EntityState.Added).ToList();
             added.ForEach(E =>
             {
-                E.Property(x => x.CreatedAt).CurrentValue = DateTime.Now;
+                E.Property(x => x.CreatedAt).CurrentValue = DateTimeOffset.UtcNow;
                 E.Property(x => x.UpdatedAt).IsModified = true;
             });
 
             var modified = ChangeTracker.Entries<IAuditableEntity>().Where(E => E.State == EntityState.Modified).ToList();
             modified.ForEach(E =>
             {
-                E.Property(x => x.UpdatedAt).CurrentValue = DateTime.Now;
+                E.Property(x => x.UpdatedAt).CurrentValue = DateTimeOffset.UtcNow;
                 E.Property(x => x.UpdatedAt).IsModified = true;
                 E.Property(x => x.CreatedAt).CurrentValue = E.Property(x => x.CreatedAt).OriginalValue;
                 E.Property(x => x.CreatedAt).IsModified = false;

@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { Command, Option } from 'commander';
+import { DATABASES, SUPPORTED_DATABASES, type Database } from './databases.js';
 import { CliError } from './errors.js';
 import { generateProject, type GenerateResult } from './generate.js';
 import { log } from './log.js';
 import { SUPPORTED_PACKAGE_MANAGERS, type PackageManager } from './package-managers.js';
-import { defaultTemplateDir, packageRoot } from './paths.js';
+import { defaultDatabasesDir, defaultTemplateDir, packageRoot } from './paths.js';
 import { detectTools } from './prerequisites.js';
 import { probeCommand, runCommand, type CommandRunner, type ToolProbe } from './process.js';
 import { inquirerPrompter, type Prompter } from './prompter.js';
@@ -15,6 +16,7 @@ import { printNextSteps, printSummary } from './summary.js';
 
 interface CliOptions {
   displayName?: string;
+  db?: Database;
   pm?: PackageManager;
   install?: boolean;
   git?: boolean;
@@ -27,6 +29,7 @@ export interface Runtime {
   run: CommandRunner;
   probe: ToolProbe;
   templateDir: string;
+  databasesDir: string;
   nodeVersion: string;
   /** Defaults to: stdin and stdout are TTYs and --yes was not passed. */
   interactive?: boolean;
@@ -36,6 +39,7 @@ export interface RunSummary {
   targetDir: string;
   projectName: string;
   pascalName: string;
+  database: Database;
   steps: StepResult[];
 }
 
@@ -50,6 +54,11 @@ export function createProgram(): Command {
     .description('Create a React + ASP.NET Core (.NET 9) project.')
     .version(readVersion())
     .argument('[project-name]', 'name of the directory to create, e.g. my-app (a path is also accepted)')
+    .addOption(
+      new Option('--db <database>', 'database provider for the API (default when not prompting: sqlserver)').choices(
+        SUPPORTED_DATABASES,
+      ),
+    )
     .addOption(new Option('--pm <manager>', 'frontend package manager').choices(SUPPORTED_PACKAGE_MANAGERS))
     .option('--install', 'install frontend dependencies (default when not prompting)')
     .option('--no-install', 'do not install frontend dependencies')
@@ -67,6 +76,7 @@ export async function main(argv: string[] = process.argv, overrides: Partial<Run
     run: runCommand,
     probe: probeCommand,
     templateDir: defaultTemplateDir,
+    databasesDir: defaultDatabasesDir,
     nodeVersion: process.version,
     ...overrides,
   };
@@ -79,11 +89,18 @@ export async function main(argv: string[] = process.argv, overrides: Partial<Run
 
   const tools = detectTools(runtime.probe, runtime.nodeVersion);
   const answers = await collectAnswers({
-    given: { directory: program.args[0], packageManager: options.pm, install: options.install, git: options.git },
+    given: {
+      directory: program.args[0],
+      database: options.db,
+      packageManager: options.pm,
+      install: options.install,
+      git: options.git,
+    },
     interactive,
     prompter: runtime.prompter,
     tools,
     templateDir: runtime.templateDir,
+    databasesDir: runtime.databasesDir,
     probe: runtime.probe,
   });
 
@@ -97,7 +114,7 @@ export async function main(argv: string[] = process.argv, overrides: Partial<Run
     log.warn('.NET SDK 9 or later was not found. The project will be created, but the backend needs it to run.');
   }
 
-  const result = await generate(answers, options.displayName?.trim() || answers.projectName, runtime.templateDir);
+  const result = await generate(answers, options.displayName?.trim() || answers.projectName, runtime);
   log.success(`Created ${result.fileCount} files in ${result.targetDir}`);
 
   const steps: StepResult[] = [
@@ -123,27 +140,36 @@ export async function main(argv: string[] = process.argv, overrides: Partial<Run
   printNextSteps({
     targetDir: result.targetDir,
     pascalName: result.pascalName,
+    database: answers.database,
     packageManager: answers.packageManager,
     dependenciesInstalled: install.status === 'done',
     dotnetSdkFound: tools.dotnetSdk,
     seedUserPassword: result.secrets.seedUserPassword,
   });
 
-  return { targetDir: result.targetDir, projectName: answers.projectName, pascalName: result.pascalName, steps };
+  return {
+    targetDir: result.targetDir,
+    projectName: answers.projectName,
+    pascalName: result.pascalName,
+    database: answers.database,
+    steps,
+  };
 }
 
-async function generate(answers: Answers, displayName: string, templateDir: string): Promise<GenerateResult> {
+async function generate(answers: Answers, displayName: string, runtime: Runtime): Promise<GenerateResult> {
   const controller = new AbortController();
   const onInterrupt = () => controller.abort();
   process.once('SIGINT', onInterrupt);
 
-  log.step(`Creating ${log.bold(answers.projectName)} in ${answers.targetDir}`);
+  log.step(`Creating ${log.bold(answers.projectName)} (${DATABASES[answers.database].name}) in ${answers.targetDir}`);
   try {
     return await generateProject({
-      templateDir,
+      templateDir: runtime.templateDir,
+      databasesDir: runtime.databasesDir,
       targetDir: answers.targetDir,
       projectName: answers.projectName,
       displayName,
+      database: answers.database,
       packageManager: answers.packageManager,
       allowNonEmpty: answers.allowNonEmpty,
       signal: controller.signal,

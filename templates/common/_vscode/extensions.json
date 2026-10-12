@@ -1,0 +1,8 @@
+{
+  "recommendations": [
+    "ms-dotnettools.csharp",
+    "dbaeumer.vscode-eslint",
+    "bradlc.vscode-tailwindcss",
+    "ms-azuretools.vscode-docker"
+  ]
+}

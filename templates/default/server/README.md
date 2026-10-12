@@ -1,6 +1,6 @@
 # 🖥️ Hướng Dẫn Server (Backend)
 
-> Backend Web API xây dựng trên nền tảng **.NET 9**, kiến trúc **Clean Architecture 4 lớp** (Domain, Application, Infrastructure, Api) kết hợp với **ASP.NET Core Identity**, **JWT Bearer Token**, **Entity Framework Core 9** và **Dapper**.
+> Backend Web API xây dựng trên nền tảng **.NET 9**, kiến trúc **Clean Architecture 4 lớp** (Domain, Application, Infrastructure, Api) kết hợp với **ASP.NET Core Identity**, **JWT Bearer Token**, **Entity Framework Core 9**, **Dapper** và **<!-- crda:database-name -->SQL Server<!-- /crda:database-name -->**.
 
 ---
 
@@ -15,7 +15,7 @@ ASP.NET Identity
 JWT Bearer
 AutoMapper
 Swagger UI
-SQL Server
+<!-- crda:database-name -->SQL Server<!-- /crda:database-name -->
 
 ---
 
@@ -69,8 +69,9 @@ Dự án tuân theo quy tắc phụ thuộc (Dependency Inversion Principle) —
 > ├── ReactDotnetBoilerplate.Infrastructure/  # [3. Database & External Implementations]
 > │   ├── DbContexts/                         # ApplicationDbContext (EF Core cấu hình quan hệ & Index)
 > │   ├── EFCoreRepositories/                 # GenericRepository<T> và Custom Repositories (StudentRepository)
-> │   ├── DapperRepositories/                 # DapperBase và các repository truy vấn hiệu năng cao
-> │   ├── Extensions/                         # ServiceCollectionExtensions, DataSeeder, ModelBuilder
+> │   ├── DapperRepositories/                 # DapperBase, IDbConnectionFactory và các repository truy vấn hiệu năng cao
+> │   ├── Extensions/                         # ServiceCollectionExtensions, DatabaseServiceCollectionExtensions, DataSeeder
+> │   ├── Migrations/                         # EF Core migrations (riêng cho từng database provider)
 > │   └── Services/                           # Triển khai Service: AuthService, StudentService, TokenService
 > │
 > ├── ReactDotnetBoilerplate.Api/             # [4. Presentation / Web API]
@@ -97,7 +98,7 @@ Dự án tuân theo quy tắc phụ thuộc (Dependency Inversion Principle) —
 ### 1. Yêu cầu môi trường
 
 - **.NET 9 SDK** (`dotnet --version` ➔ `9.x.x`)
-- **SQL Server LocalDB** (mặc định có sẵn khi cài Visual Studio) hoặc **SQL Server Express**
+- **<!-- crda:database-name -->SQL Server<!-- /crda:database-name -->** — xem mục "Database & Migrations" bên dưới
 
 
 
@@ -108,7 +109,7 @@ Tệp cấu hình nằm tại `ReactDotnetBoilerplate.Api/appsettings.json`:
 ```json
 {
   "ConnectionStrings": {
-    "DefaultConnection": "Server=(localdb)\\mssqllocaldb;Database=ReactDotnetBoilerplateDb;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=true"
+    "DefaultConnection": "<connection string của database, xem mục Database & Migrations>"
   },
   "Jwt": {
     "Key": "<generated-per-project>",
@@ -294,15 +295,29 @@ public static void AddApplicationServices(this IServiceCollection services)
 
 
 
-## 🗄️ Database Migrations
+<!-- crda:database-guide -->
+## 🗄️ Database & Migrations (SQL Server)
 
-Khi có thay đổi về Model/Entity:
+- EF Core provider: `Microsoft.EntityFrameworkCore.SqlServer` 9.0.18.
+- Connection string: `ConnectionStrings:DefaultConnection` in `ReactDotnetBoilerplate.Api/appsettings.json`,
+  overridable with the `ConnectionStrings__DefaultConnection` environment variable.
+- Migrations in `ReactDotnetBoilerplate.Infrastructure/Migrations` were generated for SQL Server. They are
+  provider-specific: switching providers means regenerating them, not reusing them.
+- In Development the API applies pending migrations and seeds sample data on startup. In other environments,
+  apply migrations explicitly.
+- Dapper (`DapperRepositories/Base`) uses the same database through `IDbConnectionFactory`, which creates
+  `SqlConnection` instances. `IDapperBase` executes stored procedures by name. No stored procedures are
+  included; create your own (for example with `migrationBuilder.Sql`) in T-SQL.
 
 ```bash
-# Thêm migration mới:
+cd server
+dotnet tool restore   # installs the dotnet-ef version pinned in .config/dotnet-tools.json
+
+# Add a migration after changing the model:
 dotnet ef migrations add AddTeacher --project ReactDotnetBoilerplate.Infrastructure --startup-project ReactDotnetBoilerplate.Api
 
-# Cập nhật Database:
+# Apply migrations to the configured database:
 dotnet ef database update --project ReactDotnetBoilerplate.Infrastructure --startup-project ReactDotnetBoilerplate.Api
 ```
+<!-- /crda:database-guide -->
 

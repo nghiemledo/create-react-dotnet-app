@@ -50,6 +50,7 @@ export function buildReplacements(context: ReplacementContext): Replacement[] {
     },
     { from: TEMPLATE_TOKENS.jwtSigningKey, to: secrets.jwtSigningKey },
     { from: TEMPLATE_TOKENS.seedUserPassword, to: secrets.seedUserPassword },
+    { from: TEMPLATE_TOKENS.databasePassword, to: secrets.databasePassword },
   ];
 }
 

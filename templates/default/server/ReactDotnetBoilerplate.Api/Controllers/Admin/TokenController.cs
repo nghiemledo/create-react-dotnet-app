@@ -39,7 +39,7 @@ namespace ReactDotnetBoilerplate.Api.Controllers.Admin
 
             var user = await _userManager.FindByNameAsync(userName);
 
-            if (user is null || user.RefreshToken != refreshToken || user.RefreshTokenExpiryTime <= DateTime.Now)
+            if (user is null || user.RefreshToken != refreshToken || user.RefreshTokenExpiryTime <= DateTime.UtcNow)
                 return BadRequest("Invalid client request");
 
             var newAccessToken = _tokenService.GenerateAccessToken(principal.Claims);

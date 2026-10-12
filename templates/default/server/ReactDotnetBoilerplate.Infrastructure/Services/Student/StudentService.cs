@@ -29,11 +29,12 @@ namespace ReactDotnetBoilerplate.Infrastructure.Services.Student
 
             if (!string.IsNullOrWhiteSpace(filter.Keyword))
             {
-                var keyword = filter.Keyword.Trim();
+                // Lower-cased on both sides so the search is case-insensitive on SQL Server and PostgreSQL alike.
+                var keyword = filter.Keyword.Trim().ToLowerInvariant();
                 query = query.Where(x =>
-                    x.StudentCode.Contains(keyword) ||
-                    x.FullName.Contains(keyword) ||
-                    x.Email.Contains(keyword));
+                    x.StudentCode.ToLower().Contains(keyword) ||
+                    x.FullName.ToLower().Contains(keyword) ||
+                    x.Email.ToLower().Contains(keyword));
             }
 
             if (filter.ClassId.HasValue)

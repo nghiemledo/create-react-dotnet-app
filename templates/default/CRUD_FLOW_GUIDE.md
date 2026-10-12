@@ -30,7 +30,7 @@
 |      ↓                                                                                |
 |   4. DOMAIN: Entity (Students Table, AuditableEntity<Guid>)                           |
 |      ↓                                                                                |
-|   5. DATABASE: LocalDB / SQL Server                                                   |
+|   5. DATABASE: EF Core database (SQL Server or PostgreSQL)                            |
 +---------------------------------------------------------------------------------------+
 ```
 

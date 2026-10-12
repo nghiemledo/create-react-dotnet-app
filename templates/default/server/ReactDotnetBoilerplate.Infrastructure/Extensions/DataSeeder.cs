@@ -92,7 +92,7 @@ namespace ReactDotnetBoilerplate.Infrastructure.Extensions
                     IsActive = true,
                     SecurityStamp = Guid.NewGuid().ToString(),
                     LockoutEnabled = false,
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTimeOffset.UtcNow
                 };
                 var result = await userManager.CreateAsync(user1, "__SEED_USER_PASSWORD__");
 
@@ -121,7 +121,7 @@ namespace ReactDotnetBoilerplate.Infrastructure.Extensions
                     IsActive = true,
                     SecurityStamp = Guid.NewGuid().ToString(),
                     LockoutEnabled = false,
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTimeOffset.UtcNow
                 };
 
                 var result = await userManager.CreateAsync(user2, "__SEED_USER_PASSWORD__");
@@ -153,7 +153,7 @@ namespace ReactDotnetBoilerplate.Infrastructure.Extensions
                     IsActive = true,
                     SecurityStamp = Guid.NewGuid().ToString(),
                     LockoutEnabled = false,
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTimeOffset.UtcNow
                 };
 
                 var result = await userManager.CreateAsync(user3, "__SEED_USER_PASSWORD__");
@@ -188,7 +188,7 @@ namespace ReactDotnetBoilerplate.Infrastructure.Extensions
                     IsActive = true,
                     SecurityStamp = Guid.NewGuid().ToString(),
                     LockoutEnabled = false,
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTimeOffset.UtcNow
                 };
                 var result = await userManager.CreateAsync(user4, "__SEED_USER_PASSWORD__");
 
@@ -218,7 +218,7 @@ namespace ReactDotnetBoilerplate.Infrastructure.Extensions
                     IsActive = true,
                     SecurityStamp = Guid.NewGuid().ToString(),
                     LockoutEnabled = false,
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTimeOffset.UtcNow
                 };
                 var result = await userManager.CreateAsync(user5, "__SEED_USER_PASSWORD__");
 

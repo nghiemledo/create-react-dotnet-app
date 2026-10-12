@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -307,13 +308,16 @@ var uploadsPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uplo
 Directory.CreateDirectory(uploadsPath);
 Directory.CreateDirectory(Path.Combine(uploadsPath, "users"));
 
-using (var scope = app.Services.CreateScope())
+// Development only: apply pending migrations and seed sample accounts and data.
+// Other environments apply migrations explicitly (dotnet ef database update or a migration bundle).
+if (app.Environment.IsDevelopment())
 {
+    using var scope = app.Services.CreateScope();
     var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<AppRole>>();
     var userManager = scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>();
     var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
-    await context.Database.EnsureCreatedAsync();
+    await context.Database.MigrateAsync();
     var seeder = new DataSeeder();
     await seeder.SeedAsync(roleManager, userManager, context);
 }

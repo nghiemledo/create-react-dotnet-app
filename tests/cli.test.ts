@@ -60,15 +60,16 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
       ]);
     });
 
-    it('asks for the project name, package manager, install and git when no name is given', async () => {
+    it('asks for the project name, database, package manager, install and git when no name is given', async () => {
       const target = await newTarget('prompted-app');
-      const prompter = scriptedPrompter([target, 'npm', false, false]);
+      const prompter = scriptedPrompter([target, 'sqlserver', 'npm', false, false]);
       const run = fakeRunner();
 
       const summary = await main(argv(), runtime({ interactive: true, prompter, run }));
 
       expect(prompter.asked.map((q) => [q.kind, q.message])).toEqual([
         ['text', 'Project name:'],
+        ['select', 'Database:'],
         ['select', 'Frontend package manager:'],
         ['confirm', 'Install frontend dependencies with npm now?'],
         ['confirm', 'Initialize a new Git repository?'],
@@ -82,7 +83,7 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
 
     it('re-asks when the typed name is invalid', async () => {
       const dir = await makeTempDir();
-      const prompter = scriptedPrompter([path.join(dir, 'Bad Name'), path.join(dir, 'good-name'), 'pnpm', false, false]);
+      const prompter = scriptedPrompter([path.join(dir, 'Bad Name'), path.join(dir, 'good-name'), 'sqlserver', 'pnpm', false, false]);
 
       const summary = await main(argv(), runtime({ interactive: true, prompter }));
 
@@ -98,7 +99,7 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
 
     it('re-prompts after an invalid name argument in interactive mode', async () => {
       const dir = await makeTempDir();
-      const prompter = scriptedPrompter([path.join(dir, 'fixed-name'), 'pnpm', false, false]);
+      const prompter = scriptedPrompter([path.join(dir, 'fixed-name'), 'sqlserver', 'pnpm', false, false]);
 
       const summary = await main(argv(path.join(dir, 'con')), runtime({ interactive: true, prompter }));
 
@@ -114,22 +115,22 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
   describe('package managers', () => {
     it('only offers installed package managers', async () => {
       const target = await newTarget();
-      const prompter = scriptedPrompter([false, false]);
+      const prompter = scriptedPrompter(['sqlserver', false, false]);
 
       const summary = await main(argv(target), runtime({ interactive: true, prompter, tools: { pnpm: false } }));
 
       expect(prompter.asked.some((q) => q.message === 'Frontend package manager:')).toBe(false);
-      expect(prompter.asked[0]?.message).toBe('Install frontend dependencies with npm now?');
+      expect(prompter.asked[1]?.message).toBe('Install frontend dependencies with npm now?');
       expect(existsSync(path.join(summary.targetDir, 'client', 'pnpm-lock.yaml'))).toBe(false);
     });
 
     it('offers pnpm and npm when both are installed', async () => {
       const target = await newTarget();
-      const prompter = scriptedPrompter(['pnpm', false, false]);
+      const prompter = scriptedPrompter(['sqlserver', 'pnpm', false, false]);
 
       await main(argv(target), runtime({ interactive: true, prompter }));
 
-      expect(prompter.asked[0]).toMatchObject({ kind: 'select', choices: ['pnpm', 'npm'] });
+      expect(prompter.asked[1]).toMatchObject({ kind: 'select', choices: ['pnpm', 'npm'] });
     });
 
     it('rejects unsupported package managers', async () => {
@@ -155,6 +156,79 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
     });
   });
 
+  describe('database', () => {
+    const infrastructureProject = (target: string) =>
+      fs.readFile(path.join(target, 'server/MyApp.Infrastructure/MyApp.Infrastructure.csproj'), 'utf8');
+    const printed = () =>
+      vi
+        .mocked(console.log)
+        .mock.calls.map((args) => String(args[0]))
+        .join('\n');
+
+    it('offers SQL Server (default) and PostgreSQL right after the project name', async () => {
+      const target = await newTarget();
+      const prompter = scriptedPrompter([target, 'postgresql', 'pnpm', false, false]);
+
+      const summary = await main(argv(), runtime({ interactive: true, prompter }));
+
+      expect(prompter.asked[1]).toMatchObject({
+        kind: 'select',
+        message: 'Database:',
+        choices: ['sqlserver', 'postgresql'],
+        labels: [
+          'SQL Server (LocalDB on Windows by default)',
+          'PostgreSQL (includes a Docker Compose file for local development)',
+        ],
+        default: 'sqlserver',
+      });
+      expect(summary.database).toBe('postgresql');
+      expect(await infrastructureProject(target)).toContain('Npgsql.EntityFrameworkCore.PostgreSQL');
+      expect(existsSync(path.join(target, 'compose.yaml'))).toBe(true);
+    });
+
+    it('keeps SQL Server as the default when not prompting, as in 0.1.x', async () => {
+      const target = await newTarget();
+      const summary = await main(argv(target, '--yes', '--no-install', '--no-git'), runtime());
+
+      expect(summary.database).toBe('sqlserver');
+      expect(await infrastructureProject(target)).toContain('Microsoft.EntityFrameworkCore.SqlServer');
+      expect(await fs.readFile(path.join(target, 'compose.yaml'), 'utf8')).toContain('mcr.microsoft.com/mssql/server');
+      expect(printed()).toContain('uses LocalDB, which is Windows only');
+      expect(printed()).toContain('set MSSQL_ACCEPT_EULA=Y in .env');
+    });
+
+    it('does not ask when --db is given', async () => {
+      const target = await newTarget();
+      const prompter = scriptedPrompter(['pnpm', false, false]);
+
+      const summary = await main(argv(target, '--db', 'postgresql'), runtime({ interactive: true, prompter }));
+
+      expect(prompter.asked.map((q) => q.message)).not.toContain('Database:');
+      expect(summary.database).toBe('postgresql');
+      expect(printed()).toContain('docker compose up -d');
+      expect(printed()).not.toContain('LocalDB');
+    });
+
+    it.each([
+      ['postgresql', 'POSTGRES_PASSWORD'],
+      ['sqlserver', 'MSSQL_SA_PASSWORD'],
+    ])('never prints the generated %s database password', async (database, variable) => {
+      const target = await newTarget();
+      await main(argv(target, '--db', database, '--no-install', '--no-git'), runtime());
+
+      const env = await fs.readFile(path.join(target, '.env'), 'utf8');
+      const password = new RegExp(`^${variable}=([A-Za-z0-9]+)$`, 'm').exec(env)?.[1];
+      expect(password).toMatch(/^[A-Za-z0-9]{24}$/);
+      expect(printed()).not.toContain(password);
+    });
+
+    it('rejects unsupported databases before writing anything', async () => {
+      const target = await newTarget();
+      await expect(main(argv(target, '--db', 'mysql'), runtime())).rejects.toThrow(CommanderError);
+      expect(existsSync(target)).toBe(false);
+    });
+  });
+
   describe('existing destination', () => {
     it('refuses a non-empty directory when not prompting and leaves it untouched', async () => {
       const target = await newTarget();
@@ -168,7 +242,7 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
       const dir = await makeTempDir();
       const existing = path.join(dir, 'taken');
       await writeFiles(existing, { 'notes.txt': 'keep me' });
-      const prompter = scriptedPrompter(['rename', path.join(dir, 'fresh'), 'pnpm', false, false]);
+      const prompter = scriptedPrompter(['rename', path.join(dir, 'fresh'), 'sqlserver', 'pnpm', false, false]);
 
       const summary = await main(argv(existing), runtime({ interactive: true, prompter }));
 
@@ -179,7 +253,7 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
     it('adds the project to a non-empty directory only after explicit confirmation, keeping existing files', async () => {
       const target = await newTarget();
       await writeFiles(target, { 'notes.txt': 'keep me', 'client/design.md': 'mine' });
-      const prompter = scriptedPrompter(['merge', 'pnpm', false, false]);
+      const prompter = scriptedPrompter(['merge', 'sqlserver', 'pnpm', false, false]);
 
       await main(argv(target), runtime({ interactive: true, prompter }));
 
@@ -211,9 +285,10 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
   describe('cancellation', () => {
     it.each<[string, ScriptedAnswer[]]>([
       ['project name', [CANCEL]],
-      ['package manager', ['__TARGET__', CANCEL]],
-      ['install question', ['__TARGET__', 'pnpm', CANCEL]],
-      ['git question', ['__TARGET__', 'pnpm', true, CANCEL]],
+      ['database', ['__TARGET__', CANCEL]],
+      ['package manager', ['__TARGET__', 'postgresql', CANCEL]],
+      ['install question', ['__TARGET__', 'sqlserver', 'pnpm', CANCEL]],
+      ['git question', ['__TARGET__', 'postgresql', 'pnpm', true, CANCEL]],
     ])('cancelling at the %s prompt writes nothing and runs nothing', async (_label, script) => {
       const target = await newTarget();
       const run = fakeRunner();

@@ -26,7 +26,7 @@ Entity Framework Core
 Dapper
 ASP.NET Core Identity
 JWT
-SQL Server
+<!-- crda:database-name -->SQL Server<!-- /crda:database-name -->
 Swagger
 
 ---
@@ -39,6 +39,7 @@ Swagger
 demo-software-architecture/
 ├── client/                     # Mã nguồn Frontend (React + Vite + TypeScript)
 │   ├── src/                    # Components, Pages, State, API, Routes
+│   ├── scripts/codegen.mjs     # Sinh src/types/api.generated.ts từ OpenAPI của Backend
 │   ├── package.json
 │   └── README.md               # 📖 Hướng dẫn chi tiết cho Frontend
 ├── server/                     # Mã nguồn Backend (.NET 9 Clean Architecture)
@@ -65,11 +66,35 @@ demo-software-architecture/
 
 - **Node.js**: Phiên bản 20+ hoặc 22+ (khuyến nghị dùng `pnpm` hoặc `npm`).
 - **.NET SDK**: Phiên bản 9.0+ (`dotnet --version`).
-- **Cơ sở dữ liệu**: SQL Server LocalDB (`(localdb)\mssqllocaldb`) đi kèm với Visual Studio hoặc SQL Server Express.
+- **Cơ sở dữ liệu**: <!-- crda:database-name -->SQL Server<!-- /crda:database-name --> (xem mục "Database" bên dưới).
 
 ---
 
+<!-- crda:database-setup -->
+### Database: SQL Server
 
+The API uses Entity Framework Core with `Microsoft.EntityFrameworkCore.SqlServer`. The connection string is
+`ConnectionStrings:DefaultConnection` in `server/ReactDotnetBoilerplate.Api/appsettings.json` and points to
+SQL Server LocalDB, which is available on Windows only.
+
+To use another SQL Server instance (for example on macOS or Linux), override the connection string with an
+environment variable instead of editing the file:
+
+```bash
+# Optional: SQL Server in Docker. Choose your own strong password.
+docker run -e "ACCEPT_EULA=Y" -e "MSSQL_SA_PASSWORD=<your-strong-password>" -p 1433:1433 -d mcr.microsoft.com/mssql/server:2022-latest
+
+# bash/zsh
+export ConnectionStrings__DefaultConnection="Server=localhost,1433;Database=ReactDotnetBoilerplateDb;User Id=sa;Password=<your-strong-password>;TrustServerCertificate=True"
+# PowerShell
+$env:ConnectionStrings__DefaultConnection="Server=localhost,1433;Database=ReactDotnetBoilerplateDb;User Id=sa;Password=<your-strong-password>;TrustServerCertificate=True"
+```
+
+In the Development environment the API applies pending migrations and seeds sample data on startup. See
+`server/README.md` for migration commands.
+<!-- /crda:database-setup -->
+
+---
 
 ### 2. Chạy Backend (Server)
 
@@ -89,7 +114,7 @@ demo-software-architecture/
   - **Swagger UI:** [https://localhost:7001/swagger](https://localhost:7001/swagger)
   - **API Base URL:** `https://localhost:7001/`
 
-> **Lưu ý:** Hệ thống tự động tạo Database `ReactDotnetBoilerplateDb` và Seed dữ liệu mẫu (Tài khoản người dùng + Dữ liệu sinh viên) khi khởi chạy lần đầu.
+> **Lưu ý:** Ở môi trường Development, API tự động áp dụng migrations cho Database `ReactDotnetBoilerplateDb` và Seed dữ liệu mẫu (Tài khoản người dùng + Dữ liệu sinh viên) khi khởi chạy.
 
 ---
 
@@ -112,11 +137,16 @@ demo-software-architecture/
    VITE_API_BASE_URL=https://localhost:7001
    VITE_API_TIMEOUT=15000
   ```
-4. Khởi động Web Dev Server:
+4. (Khi API thay đổi) Sinh lại TypeScript type từ OpenAPI của Backend. Backend ở bước 2 phải đang chạy:
+  ```bash
+   npm run codegen
+  ```
+   Lệnh này ghi `client/src/types/api.generated.ts` từ `http://localhost:5058/swagger/v1/swagger.json`. Xem mục "Sinh TypeScript Type từ OpenAPI" trong [client/README.md](./client/README.md) để biết tùy chọn và cách xử lý lỗi.
+5. Khởi động Web Dev Server:
   ```bash
    npm run dev
   ```
-5. Mở trình duyệt tại: [http://localhost:5173](http://localhost:5173) (hoặc port hiển thị trên terminal).
+6. Mở trình duyệt tại: [http://localhost:5173](http://localhost:5173) (hoặc port hiển thị trên terminal).
 
 ---
 

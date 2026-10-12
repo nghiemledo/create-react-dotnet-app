@@ -1,12 +1,21 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {
+  DATABASES,
+  DEFAULT_DATABASE,
+  databaseDocBlocks,
+  renderDocBlocks,
+  type Database,
+  type ProviderEdit,
+} from './databases.js';
 import { CancelledError, CliError } from './errors.js';
 import { toPascalCase, validateDisplayName, validateProjectName } from './naming.js';
 import type { PackageManager } from './package-managers.js';
+import { defaultCommonDir, defaultDatabasesDir } from './paths.js';
 import { applyReplacements, buildReplacements, type Replacement } from './replacements.js';
 import { generateSecrets, type ProjectSecrets } from './secrets.js';
 import { isBinary } from './text.js';
-import { SOURCE_PROJECT_NAME, TEMPLATE_GITIGNORE_NAME, TEMPLATE_TOKENS } from './tokens.js';
+import { SOURCE_PROJECT_NAME, TEMPLATE_DOTFILE_NAMES, TEMPLATE_TOKENS } from './tokens.js';
 
 const PNPM_LOCKFILE = 'client/pnpm-lock.yaml';
 const ENV_EXAMPLE = 'client/.env.example';
@@ -15,8 +24,19 @@ const ENV_FILE = 'client/.env';
 const NEVER_COPIED = new Set(['.git']);
 
 export interface PlannedFile {
+  /** Directory the file is read from: the template, or a database overlay. */
+  sourceDir: string;
   templatePath: string;
   destinationPath: string;
+}
+
+export interface PlanOptions {
+  templateDir: string;
+  pascalName: string;
+  packageManager: PackageManager;
+  database?: Database;
+  databasesDir?: string;
+  commonDir?: string;
 }
 
 export type DestinationState = 'missing' | 'empty' | 'non-empty';
@@ -33,6 +53,12 @@ export interface GenerateOptions {
   projectName: string;
   displayName: string;
   packageManager: PackageManager;
+  /** Defaults to the template's own provider (SQL Server). */
+  database?: Database;
+  /** Where provider overlays live; defaults to the packaged `templates/databases`. */
+  databasesDir?: string;
+  /** Files added for every database; defaults to the packaged `templates/common`. */
+  commonDir?: string;
   /** Explicit consent to add files to a non-empty directory. Existing files are never overwritten. */
   allowNonEmpty?: boolean;
   /** Aborting stops generation and removes everything this run wrote. */
@@ -59,7 +85,16 @@ export async function generateProject(options: GenerateOptions): Promise<Generat
   }
 
   const pascalName = toPascalCase(options.projectName);
-  const plan = await planProject(options.templateDir, pascalName, options.packageManager);
+  const database = options.database ?? DEFAULT_DATABASE;
+  const plan = await planProject({
+    templateDir: options.templateDir,
+    pascalName,
+    packageManager: options.packageManager,
+    database,
+    databasesDir: options.databasesDir,
+    commonDir: options.commonDir,
+  });
+  await verifyProviderEdits(options.templateDir, database);
   const destination = await inspectDestination(options.targetDir, plan);
   if (destination.state === 'non-empty') {
     if (!options.allowNonEmpty) {
@@ -77,6 +112,11 @@ export async function generateProject(options: GenerateOptions): Promise<Generat
     displayName: options.displayName,
     secrets,
   });
+  const rendering: RenderContext = {
+    replacements,
+    edits: DATABASES[database].edits,
+    docBlocks: databaseDocBlocks(database),
+  };
 
   const writtenFiles: string[] = [];
   const createdDirs: string[] = [];
@@ -86,7 +126,7 @@ export async function generateProject(options: GenerateOptions): Promise<Generat
         throw new CancelledError('Cancelled while writing project files. Files written by this run were removed.');
       }
       const destinationPath = path.join(options.targetDir, ...file.destinationPath.split('/'));
-      const content = await renderFile(options.templateDir, file.templatePath, replacements);
+      const content = await renderFile(file, rendering);
       const createdDir = await fs.mkdir(path.dirname(destinationPath), { recursive: true });
       if (createdDir) {
         createdDirs.push(createdDir);
@@ -104,21 +144,58 @@ export async function generateProject(options: GenerateOptions): Promise<Generat
 }
 
 /** Every file the project will contain, with renamed destination paths. */
-export async function planProject(
-  templateDir: string,
-  pascalName: string,
-  packageManager: PackageManager,
-): Promise<PlannedFile[]> {
+export async function planProject(options: PlanOptions): Promise<PlannedFile[]> {
+  const { templateDir, pascalName, packageManager } = options;
+  const info = DATABASES[options.database ?? DEFAULT_DATABASE];
   const templateFiles = await listTemplateFiles(templateDir);
+  const plannedFile = (sourceDir: string, templatePath: string): PlannedFile => ({
+    sourceDir,
+    templatePath,
+    destinationPath: toDestinationPath(templatePath, pascalName),
+  });
+
   const plan = templateFiles
     .filter((templatePath) => !(packageManager === 'npm' && templatePath === PNPM_LOCKFILE))
-    .map((templatePath) => ({ templatePath, destinationPath: toDestinationPath(templatePath, pascalName) }));
+    .filter((templatePath) => !(info.replacesPrefix && templatePath.startsWith(info.replacesPrefix)))
+    .map((templatePath) => plannedFile(templateDir, templatePath));
+
+  const overlays = [
+    { dir: options.commonDir ?? defaultCommonDir, label: 'shared project' },
+    { dir: path.join(options.databasesDir ?? defaultDatabasesDir, info.overlay), label: info.name },
+  ];
+  for (const overlay of overlays) {
+    const overlayFiles = await listOverlayFiles(overlay.dir, overlay.label);
+    const overlaid = new Set(overlayFiles);
+    const kept = plan.filter((file) => !overlaid.has(file.templatePath));
+    plan.length = 0;
+    plan.push(...kept, ...overlayFiles.map((templatePath) => plannedFile(overlay.dir, templatePath)));
+  }
 
   // The client works without .env (env.ts has fallbacks), but starting from the example keeps the settings visible.
   if (templateFiles.includes(ENV_EXAMPLE)) {
-    plan.push({ templatePath: ENV_EXAMPLE, destinationPath: ENV_FILE });
+    plan.push({ sourceDir: templateDir, templatePath: ENV_EXAMPLE, destinationPath: ENV_FILE });
   }
   return plan;
+}
+
+/** Fails before anything is written if a provider edit no longer matches the bundled template exactly once. */
+async function verifyProviderEdits(templateDir: string, database: Database): Promise<void> {
+  const info = DATABASES[database];
+  for (const edit of info.edits) {
+    let text: string;
+    try {
+      text = await fs.readFile(path.join(templateDir, ...edit.templatePath.split('/')), 'utf8');
+    } catch {
+      throw new CliError(`Cannot generate a ${info.name} project: ${edit.templatePath} is missing from the template.`);
+    }
+    const occurrences = text.split(edit.from).length - 1;
+    if (occurrences !== 1) {
+      throw new CliError(
+        `Cannot generate a ${info.name} project: the template's ${edit.templatePath} does not match what this ` +
+          `version of the CLI expects (found the expected text ${occurrences} times). Nothing was written.`,
+      );
+    }
+  }
 }
 
 export async function inspectDestination(targetDir: string, plan: PlannedFile[]): Promise<DestinationInspection> {
@@ -167,17 +244,34 @@ export function toDestinationPath(templatePath: string, pascalName: string): str
   return templatePath
     .split('/')
     .map((segment) =>
-      segment === TEMPLATE_GITIGNORE_NAME ? '.gitignore' : segment.replaceAll(SOURCE_PROJECT_NAME, pascalName),
+      TEMPLATE_DOTFILE_NAMES[segment] ?? segment.replaceAll(SOURCE_PROJECT_NAME, pascalName),
     )
     .join('/');
 }
 
-async function renderFile(templateDir: string, templatePath: string, replacements: Replacement[]): Promise<Buffer | string> {
-  const source = await fs.readFile(path.join(templateDir, ...templatePath.split('/')));
+interface RenderContext {
+  replacements: Replacement[];
+  edits: ProviderEdit[];
+  docBlocks: Record<string, string>;
+}
+
+async function renderFile(file: PlannedFile, context: RenderContext): Promise<Buffer | string> {
+  const { templatePath } = file;
+  const source = await fs.readFile(path.join(file.sourceDir, ...templatePath.split('/')));
   if (isBinary(source)) {
     return source;
   }
-  const text = applyReplacements(source.toString('utf8'), templatePath, replacements);
+  // Provider edits and doc blocks use the source identifiers, so they run before the rename.
+  let text = source.toString('utf8');
+  for (const edit of context.edits) {
+    if (edit.templatePath === templatePath) {
+      text = text.replace(edit.from, () => edit.to);
+    }
+  }
+  if (templatePath.endsWith('.md')) {
+    text = renderDocBlocks(text, context.docBlocks, templatePath);
+  }
+  text = applyReplacements(text, templatePath, context.replacements);
   const leftover = Object.values(TEMPLATE_TOKENS).find((token) => text.includes(token));
   if (leftover) {
     throw new Error(`Template token ${leftover} was not replaced in ${templatePath}.`);
@@ -212,22 +306,18 @@ async function rollBack(writtenFiles: string[], createdDirs: string[]): Promise<
   }
 }
 
-async function listTemplateFiles(templateDir: string): Promise<string[]> {
+async function listOverlayFiles(overlayDir: string, label: string): Promise<string[]> {
   try {
-    const stat = await fs.stat(templateDir);
-    if (!stat.isDirectory()) {
-      throw new Error('not a directory');
-    }
+    return await walkFiles(overlayDir);
   } catch {
-    throw new CliError(
-      `Template directory not found: ${templateDir}. ` +
-        'If you are developing this CLI, run "npm run sync-template" first.',
-    );
+    throw new CliError(`The ${label} files are missing from this installation (${overlayDir}). Reinstall the package.`);
   }
+}
 
+async function walkFiles(rootDir: string): Promise<string[]> {
   const files: string[] = [];
   const walk = async (relativeDir: string): Promise<void> => {
-    const entries = await fs.readdir(path.join(templateDir, relativeDir), { withFileTypes: true });
+    const entries = await fs.readdir(path.join(rootDir, relativeDir), { withFileTypes: true });
     for (const entry of entries) {
       if (NEVER_COPIED.has(entry.name)) {
         continue;
@@ -241,9 +331,25 @@ async function listTemplateFiles(templateDir: string): Promise<string[]> {
     }
   };
   await walk('');
+  return files.sort();
+}
 
+async function listTemplateFiles(templateDir: string): Promise<string[]> {
+  try {
+    const stat = await fs.stat(templateDir);
+    if (!stat.isDirectory()) {
+      throw new Error('not a directory');
+    }
+  } catch {
+    throw new CliError(
+      `Template directory not found: ${templateDir}. ` +
+        'If you are developing this CLI, run "npm run sync-template" first.',
+    );
+  }
+
+  const files = await walkFiles(templateDir);
   if (files.length === 0) {
     throw new CliError(`Template directory is empty: ${templateDir}`);
   }
-  return files.sort();
+  return files;
 }

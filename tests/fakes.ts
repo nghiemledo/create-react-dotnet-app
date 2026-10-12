@@ -63,6 +63,9 @@ export interface AskedQuestion {
   kind: 'text' | 'select' | 'confirm';
   message: string;
   choices?: unknown[];
+  /** Labels shown for select choices, in order. */
+  labels?: string[];
+  default?: unknown;
   /** Text answers the validator rejected before one was accepted. */
   rejected: string[];
 }
@@ -102,7 +105,8 @@ export function scriptedPrompter(script: ScriptedAnswer[]): Prompter & { asked: 
     select: <T>(question: { message: string; choices: { name: string; value: T }[]; default?: T }) =>
       settle(() => {
         const choices = question.choices.map((choice) => choice.value);
-        asked.push({ kind: 'select', message: question.message, choices, rejected: [] });
+        const labels = question.choices.map((choice) => choice.name);
+        asked.push({ kind: 'select', message: question.message, choices, labels, default: question.default, rejected: [] });
         const answer = next(question.message);
         if (!choices.includes(answer as T)) {
           throw new Error(`"${String(answer)}" is not offered for "${question.message}" (offered: ${choices.join(', ')})`);

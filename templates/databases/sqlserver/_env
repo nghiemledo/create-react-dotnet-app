@@ -1,0 +1,11 @@
+# Local development settings for compose.yaml (optional SQL Server container), generated with this project.
+# Git-ignored. The password is a random development credential. See .env.example for what each value does.
+
+# Set to Y to accept the SQL Server license terms (https://hub.docker.com/r/microsoft/mssql-server).
+MSSQL_ACCEPT_EULA=
+MSSQL_SA_PASSWORD=__DB_PASSWORD__
+MSSQL_PORT=1433
+
+# Uncomment to use the container instead of LocalDB. Applied by the "Backend: API (settings from .env)" VS Code
+# launch configuration; for `dotnet run`, set the same variable in your shell.
+# ConnectionStrings__DefaultConnection=Server=localhost,1433;Database=ReactDotnetBoilerplateDb;User Id=sa;Password=__DB_PASSWORD__;TrustServerCertificate=True;MultipleActiveResultSets=true

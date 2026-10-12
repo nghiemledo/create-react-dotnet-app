@@ -5,3 +5,8 @@ import { fileURLToPath } from 'node:url';
 export const packageRoot = fileURLToPath(new URL('..', import.meta.url));
 
 export const defaultTemplateDir = path.join(packageRoot, 'templates', 'default');
+
+/** Provider overlays (compose.yaml, .env files, PostgreSQL migrations), laid out like the template they are added to. */
+export const defaultDatabasesDir = path.join(packageRoot, 'templates', 'databases');
+/** Files added to every generated project regardless of database (editor configuration, root .gitignore). */
+export const defaultCommonDir = path.join(packageRoot, 'templates', 'common');

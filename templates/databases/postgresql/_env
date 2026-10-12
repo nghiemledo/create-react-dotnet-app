@@ -1,0 +1,11 @@
+# Local development settings for compose.yaml (PostgreSQL), generated with this project. Git-ignored.
+# The password is a random development credential; it also appears in the connection string in
+# server/ReactDotnetBoilerplate.Api/appsettings.json. See .env.example for what each value does.
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=__DB_PASSWORD__
+POSTGRES_DB=ReactDotnetBoilerplateDb
+POSTGRES_PORT=5432
+
+# Optional override, applied by the "Backend: API (settings from .env)" VS Code launch configuration.
+# Keep it in sync with the values above if you change them.
+# ConnectionStrings__DefaultConnection=Host=localhost;Port=5432;Database=ReactDotnetBoilerplateDb;Username=postgres;Password=__DB_PASSWORD__

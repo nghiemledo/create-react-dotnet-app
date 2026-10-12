@@ -2,13 +2,16 @@ import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { DATABASES, SUPPORTED_DATABASES, TEMPLATE_PATHS, type Database } from '../src/databases.js';
 import { CancelledError, CliError } from '../src/errors.js';
 import { generateProject, toDestinationPath, type GenerateOptions } from '../src/generate.js';
-import { defaultTemplateDir } from '../src/paths.js';
+import { defaultDatabasesDir, defaultTemplateDir } from '../src/paths.js';
+import { escapeRegExp } from '../src/text.js';
 import { TEMPLATE_TOKENS } from '../src/tokens.js';
 import { listFiles, makeTempDir, writeFiles, type AppSettings } from './helpers.js';
 
-const secrets = { jwtSigningKey: 'generated-jwt-key', seedUserPassword: 'GeneratedPw123' };
+const secrets = { jwtSigningKey: 'generated-jwt-key', seedUserPassword: 'GeneratedPw123', databasePassword: 'GeneratedDbPw456' };
+const unreplacedSecrets = { jwtSigningKey: TEMPLATE_TOKENS.jwtSigningKey, seedUserPassword: 'x', databasePassword: 'y' };
 const PNG_HEADER = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]);
 
 async function makeFixtureTemplate(extra: Record<string, string | Buffer> = {}): Promise<string> {
@@ -27,9 +30,19 @@ async function makeFixtureTemplate(extra: Record<string, string | Buffer> = {}):
   return templateDir;
 }
 
+/** Empty provider and shared overlays, so fixture tests see only the fixture template. */
+async function makeEmptyOverlays(): Promise<{ databasesDir: string; commonDir: string }> {
+  const databasesDir = await makeTempDir();
+  for (const database of SUPPORTED_DATABASES) {
+    await fs.mkdir(path.join(databasesDir, DATABASES[database].overlay));
+  }
+  return { databasesDir, commonDir: await makeTempDir() };
+}
+
 async function options(overrides: Partial<GenerateOptions> = {}): Promise<GenerateOptions> {
   return {
     templateDir: overrides.templateDir ?? (await makeFixtureTemplate()),
+    ...(await makeEmptyOverlays()),
     targetDir: path.join(await makeTempDir(), 'my-app'),
     projectName: 'my-app',
     displayName: 'My App',
@@ -45,6 +58,9 @@ describe('toDestinationPath', () => {
       'server/MyApp.Api/MyApp.Api.csproj',
     );
     expect(toDestinationPath('client/_gitignore', 'MyApp')).toBe('client/.gitignore');
+    expect(toDestinationPath('_env', 'MyApp')).toBe('.env');
+    expect(toDestinationPath('_vscode/launch.json', 'MyApp')).toBe('.vscode/launch.json');
+    expect(toDestinationPath('client/_env.example', 'MyApp')).toBe('client/_env.example');
   });
 });
 
@@ -136,7 +152,7 @@ describe('generateProject (fixture template)', () => {
   });
 
   it('removes a directory it created when generation fails', async () => {
-    const opts = await options({ secrets: { jwtSigningKey: TEMPLATE_TOKENS.jwtSigningKey, seedUserPassword: 'x' } });
+    const opts = await options({ secrets: unreplacedSecrets });
     await expect(generateProject(opts)).rejects.toThrow(/was not replaced/);
     expect(existsSync(opts.targetDir)).toBe(false);
   });
@@ -144,7 +160,7 @@ describe('generateProject (fixture template)', () => {
   it('removes only its own files from a pre-existing directory when generation fails', async () => {
     const opts = await options({
       allowNonEmpty: true,
-      secrets: { jwtSigningKey: TEMPLATE_TOKENS.jwtSigningKey, seedUserPassword: 'x' },
+      secrets: unreplacedSecrets,
     });
     await writeFiles(opts.targetDir, { 'keep.txt': 'existing work' });
 
@@ -162,7 +178,170 @@ describe('generateProject (fixture template)', () => {
   });
 });
 
-describe.skipIf(!existsSync(defaultTemplateDir))('generateProject (bundled template)', () => {
+describe('generateProject database providers (fixture template)', () => {
+  const postgresEdits = DATABASES.postgresql.edits;
+  const anchor = (templatePath: string) => postgresEdits.find((edit) => edit.templatePath === templatePath)!.from;
+  const MIGRATIONS = TEMPLATE_PATHS.migrations;
+
+  async function makeProviderTemplate(overrides: Record<string, string> = {}): Promise<string> {
+    return makeFixtureTemplate({
+      [TEMPLATE_PATHS.infrastructureProject]: `<ItemGroup>\n${anchor(TEMPLATE_PATHS.infrastructureProject)}\n</ItemGroup>\n`,
+      [TEMPLATE_PATHS.databaseRegistration]: `AddDbContext(options => ${anchor(TEMPLATE_PATHS.databaseRegistration)});\n`,
+      [TEMPLATE_PATHS.dapperConnectionFactory]: postgresEdits
+        .filter((edit) => edit.templatePath === TEMPLATE_PATHS.dapperConnectionFactory)
+        .map((edit) => edit.from)
+        .join('\n// ...\n'),
+      [TEMPLATE_PATHS.appsettings]:
+        `{"Jwt":{"Key":"${TEMPLATE_TOKENS.jwtSigningKey}"},"ConnectionStrings":{${anchor(TEMPLATE_PATHS.appsettings)}}}`,
+      [`${MIGRATIONS}20260101000000_InitialCreate.cs`]: 'namespace ReactDotnetBoilerplate.Infrastructure.Migrations; // SqlServer',
+      'README.md': '# App\n\nUses <!-- crda:database-name -->SQL Server<!-- /crda:database-name -->.\n',
+      ...overrides,
+    });
+  }
+
+  async function makeOverlays(files: Record<string, string> = {}): Promise<string> {
+    const databasesDir = await makeTempDir();
+    await writeFiles(path.join(databasesDir, 'sqlserver'), { 'compose.yaml': 'image: mssql\n' });
+    await writeFiles(path.join(databasesDir, 'postgresql'), {
+      'compose.yaml': `POSTGRES_PASSWORD: ${TEMPLATE_TOKENS.databasePassword}\nPOSTGRES_DB: ReactDotnetBoilerplateDb\n`,
+      [`${MIGRATIONS}20260102000000_InitialCreate.cs`]: 'namespace ReactDotnetBoilerplate.Infrastructure.Migrations; // Npgsql',
+      ...files,
+    });
+    return databasesDir;
+  }
+
+  it('leaves the template untouched for SQL Server and renders its doc blocks', async () => {
+    const opts = await options({ templateDir: await makeProviderTemplate(), databasesDir: await makeOverlays() });
+    await generateProject(opts);
+
+    const files = await listFiles(opts.targetDir);
+    expect(files).toContain('server/MyApp.Infrastructure/Migrations/20260101000000_InitialCreate.cs');
+    expect(files.filter((f) => f.includes('/Migrations/'))).toHaveLength(1);
+    const read = (p: string) => fs.readFile(path.join(opts.targetDir, p), 'utf8');
+    expect(await read('compose.yaml')).toBe('image: mssql\n');
+    expect(await read('server/MyApp.Infrastructure/MyApp.Infrastructure.csproj')).toContain('EntityFrameworkCore.SqlServer');
+    expect(await read('README.md')).toBe('# App\n\nUses SQL Server.\n');
+  });
+
+  it('applies the PostgreSQL edits, swaps the migrations and injects one generated password', async () => {
+    const opts = await options({
+      templateDir: await makeProviderTemplate(),
+      databasesDir: await makeOverlays(),
+      database: 'postgresql',
+    });
+    await generateProject(opts);
+
+    const files = await listFiles(opts.targetDir);
+    expect(files.filter((f) => f.includes('/Migrations/'))).toEqual([
+      'server/MyApp.Infrastructure/Migrations/20260102000000_InitialCreate.cs',
+    ]);
+    const read = (p: string) => fs.readFile(path.join(opts.targetDir, p), 'utf8');
+    expect(await read('server/MyApp.Infrastructure/Migrations/20260102000000_InitialCreate.cs')).toBe(
+      'namespace MyApp.Infrastructure.Migrations; // Npgsql',
+    );
+    const csproj = await read('server/MyApp.Infrastructure/MyApp.Infrastructure.csproj');
+    expect(csproj).toContain('<PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />');
+    expect(csproj).not.toContain('SqlServer');
+    expect(await read('server/MyApp.Infrastructure/Extensions/DatabaseServiceCollectionExtensions.cs')).toContain(
+      'options.UseNpgsql(connectionString)',
+    );
+    expect(await read('server/MyApp.Infrastructure/DapperRepositories/Base/DbConnectionFactory.cs')).toBe(
+      'using Npgsql;\n// ...\nreturn new NpgsqlConnection(connectionString);',
+    );
+    const appsettings = JSON.parse(await read('server/MyApp.Api/appsettings.json')) as AppSettings;
+    expect(appsettings.ConnectionStrings.DefaultConnection).toBe(
+      `Host=localhost;Port=5432;Database=MyAppDb;Username=postgres;Password=${secrets.databasePassword}`,
+    );
+    expect(await read('compose.yaml')).toBe(`POSTGRES_PASSWORD: ${secrets.databasePassword}\nPOSTGRES_DB: MyAppDb\n`);
+    expect(await read('README.md')).toBe('# App\n\nUses PostgreSQL.\n');
+  });
+
+  it.each([
+    ['csproj', TEMPLATE_PATHS.infrastructureProject, '<PackageReference Include="Something.Else" />'],
+    ['registration', TEMPLATE_PATHS.databaseRegistration, 'options.UseSqlServer(connectionString); options.UseSqlServer(connectionString)'],
+    ['Dapper connection', TEMPLATE_PATHS.dapperConnectionFactory, 'using Microsoft.Data.SqlClient;\nreturn new SqlConnection(cs);'],
+  ])('stops before writing anything when the %s anchor drifted', async (_label, templatePath, content) => {
+    const opts = await options({
+      templateDir: await makeProviderTemplate({ [templatePath]: content }),
+      databasesDir: await makeOverlays(),
+      database: 'postgresql',
+    });
+    await expect(generateProject(opts)).rejects.toThrow(/does not match what this version of the CLI expects/);
+    expect(existsSync(opts.targetDir)).toBe(false);
+  });
+
+  it('explains a missing PostgreSQL overlay instead of generating a half-converted project', async () => {
+    const opts = await options({
+      templateDir: await makeProviderTemplate(),
+      databasesDir: await makeTempDir(),
+      database: 'postgresql',
+    });
+    await expect(generateProject(opts)).rejects.toThrow(/PostgreSQL files are missing from this installation/);
+    expect(existsSync(opts.targetDir)).toBe(false);
+  });
+
+  it('adds the shared files for every database, renaming stored dotfiles, with the provider overlay winning', async () => {
+    const commonDir = await makeTempDir();
+    await writeFiles(commonDir, {
+      _gitignore: '.env\n',
+      '_vscode/launch.json': '{"program":"server/ReactDotnetBoilerplate.Api"}',
+      'compose.yaml': 'shared\n',
+    });
+    for (const database of SUPPORTED_DATABASES) {
+      const opts = await options({
+        templateDir: await makeProviderTemplate(),
+        databasesDir: await makeOverlays({ _env: `POSTGRES_PASSWORD=${TEMPLATE_TOKENS.databasePassword}\n` }),
+        commonDir,
+        database,
+      });
+      await generateProject(opts);
+
+      const files = await listFiles(opts.targetDir);
+      expect(files).toEqual(expect.arrayContaining(['.gitignore', '.vscode/launch.json']));
+      expect(files.some((f) => f.split('/').some((segment) => segment === '_vscode' || segment === '_gitignore'))).toBe(false);
+      const read = (p: string) => fs.readFile(path.join(opts.targetDir, p), 'utf8');
+      expect(await read('.vscode/launch.json')).toBe('{"program":"server/MyApp.Api"}');
+      expect(await read('compose.yaml')).not.toBe('shared\n');
+      if (database === 'postgresql') {
+        expect(await read('.env')).toBe(`POSTGRES_PASSWORD=${secrets.databasePassword}\n`);
+      }
+    }
+  });
+
+  it('explains missing shared files', async () => {
+    const opts = await options({ templateDir: await makeProviderTemplate(), commonDir: path.join(await makeTempDir(), 'nope') });
+    await expect(generateProject(opts)).rejects.toThrow(/shared project files are missing from this installation/);
+    expect(existsSync(opts.targetDir)).toBe(false);
+  });
+
+  it('rejects an unknown documentation block', async () => {
+    const opts = await options({
+      templateDir: await makeProviderTemplate({ 'README.md': '<!-- crda:nope -->x<!-- /crda:nope -->' }),
+      databasesDir: await makeOverlays(),
+    });
+    await expect(generateProject(opts)).rejects.toThrow(/Unknown documentation block "nope" in README\.md/);
+    expect(existsSync(opts.targetDir)).toBe(false);
+  });
+});
+
+describe.skipIf(!existsSync(defaultTemplateDir))('bundled template and database overlays', () => {
+  it.each(SUPPORTED_DATABASES)('contains each %s provider edit anchor exactly once', async (database) => {
+    for (const edit of DATABASES[database].edits) {
+      const text = await fs.readFile(path.join(defaultTemplateDir, ...edit.templatePath.split('/')), 'utf8');
+      expect(text.split(edit.from).length - 1, edit.templatePath).toBe(1);
+    }
+  });
+
+  it('ships its own migrations for every overlay provider', async () => {
+    for (const info of Object.values(DATABASES).filter((i) => i.replacesPrefix === TEMPLATE_PATHS.migrations)) {
+      const migrations = await listFiles(path.join(defaultDatabasesDir, info.overlay, ...TEMPLATE_PATHS.migrations.split('/')));
+      expect(migrations.some((f) => f.endsWith('_InitialCreate.cs')), info.name).toBe(true);
+      expect(migrations).toContain('ApplicationDbContextModelSnapshot.cs');
+    }
+  });
+});
+
+describe.skipIf(!existsSync(defaultTemplateDir)).each(SUPPORTED_DATABASES)('generateProject (bundled template, %s)', (database) => {
   async function generateBundled(): Promise<{ targetDir: string; files: string[] }> {
     const targetDir = path.join(await makeTempDir(), 'school-portal');
     await generateProject({
@@ -171,12 +350,353 @@ describe.skipIf(!existsSync(defaultTemplateDir))('generateProject (bundled templ
       projectName: 'school-portal',
       displayName: 'School Portal',
       packageManager: 'pnpm',
+      database,
       secrets,
     });
     return { targetDir, files: await listFiles(targetDir) };
   }
 
   const readText = (targetDir: string, file: string) => fs.readFile(path.join(targetDir, file), 'utf8');
+
+  it('contains only the selected provider, its migrations and its documentation', async () => {
+    const { targetDir, files } = await generateBundled();
+    const other: Database = database === 'postgresql' ? 'sqlserver' : 'postgresql';
+    const selectedPackage = DATABASES[database].efCorePackage;
+
+    const packageReferences: string[] = [];
+    for (const csproj of files.filter((f) => f.endsWith('.csproj'))) {
+      packageReferences.push(...[...(await readText(targetDir, csproj)).matchAll(/<PackageReference Include="([^"]+)"/g)].map((m) => m[1]!));
+    }
+    expect(packageReferences).toContain(selectedPackage.id);
+    expect(packageReferences).not.toContain(DATABASES[other].efCorePackage.id);
+    expect(await readText(targetDir, 'server/SchoolPortal.Infrastructure/SchoolPortal.Infrastructure.csproj')).toContain(
+      `<PackageReference Include="${selectedPackage.id}" Version="${selectedPackage.version}" />`,
+    );
+
+    const registration = await readText(
+      targetDir,
+      'server/SchoolPortal.Infrastructure/Extensions/DatabaseServiceCollectionExtensions.cs',
+    );
+    expect(registration).toContain(database === 'postgresql' ? 'UseNpgsql(' : 'UseSqlServer(');
+    expect(registration).not.toContain(database === 'postgresql' ? 'UseSqlServer(' : 'UseNpgsql(');
+
+    const migrations = files.filter((f) => f.startsWith('server/SchoolPortal.Infrastructure/Migrations/'));
+    expect(migrations.filter((f) => f.endsWith('_InitialCreate.cs'))).toHaveLength(1);
+    expect(migrations.filter((f) => f.endsWith('ModelSnapshot.cs'))).toHaveLength(1);
+    const snapshot = await readText(targetDir, migrations.find((f) => f.endsWith('ModelSnapshot.cs'))!);
+    expect(snapshot).toContain('namespace SchoolPortal.Infrastructure.Migrations');
+    expect(snapshot).toContain(database === 'postgresql' ? 'NpgsqlModelBuilderExtensions' : 'SqlServerModelBuilderExtensions');
+    expect(snapshot).not.toContain(database === 'postgresql' ? 'SqlServer' : 'Npgsql');
+
+    for (const doc of files.filter((f) => f.endsWith('.md'))) {
+      expect(await readText(targetDir, doc), doc).not.toContain('crda:');
+    }
+    const name = DATABASES[database].name;
+    expect(await readText(targetDir, 'README.md')).toContain(`### Database: ${name}`);
+    expect(await readText(targetDir, 'server/README.md')).toContain(`## 🗄️ Database & Migrations (${name})`);
+    expect(files).toContain('server/.config/dotnet-tools.json');
+  });
+
+  it('keeps both repository implementations, wired to the selected provider', async () => {
+    const { targetDir, files } = await generateBundled();
+    const infrastructure = 'server/SchoolPortal.Infrastructure';
+
+    for (const file of [
+      'EFCoreRepositories/Base/IGenericRepository.cs',
+      'EFCoreRepositories/Base/GenericRepository.cs',
+      'EFCoreRepositories/Student/StudentRepository.cs',
+      'DapperRepositories/Base/IDapperBase.cs',
+      'DapperRepositories/Base/DapperBase.cs',
+      'DapperRepositories/Base/IDbConnectionFactory.cs',
+      'DapperRepositories/Base/DbConnectionFactory.cs',
+    ]) {
+      expect(files, file).toContain(`${infrastructure}/${file}`);
+    }
+
+    expect(await readText(targetDir, `${infrastructure}/SchoolPortal.Infrastructure.csproj`)).toContain(
+      '<PackageReference Include="Dapper" Version="2.1.79" />',
+    );
+
+    const factory = await readText(targetDir, `${infrastructure}/DapperRepositories/Base/DbConnectionFactory.cs`);
+    const [connection, namespace, otherConnection, otherNamespace] =
+      database === 'postgresql'
+        ? ['new NpgsqlConnection(', 'using Npgsql;', 'SqlConnection(', 'Microsoft.Data.SqlClient']
+        : ['new SqlConnection(', 'using Microsoft.Data.SqlClient;', 'Npgsql', 'Npgsql'];
+    expect(factory).toContain(connection);
+    expect(factory).toContain(namespace);
+    expect(factory).not.toContain(otherConnection);
+    expect(factory).not.toContain(otherNamespace);
+
+    const dapperBase = await readText(targetDir, `${infrastructure}/DapperRepositories/Base/DapperBase.cs`);
+    expect(dapperBase).toContain('public DapperBase(IDbConnectionFactory connectionFactory)');
+    expect(dapperBase.match(/_connectionFactory\.CreateConnection\(connectionId\)/g)).toHaveLength(5);
+    expect(dapperBase).not.toMatch(/SqlConnection|Npgsql/);
+    const dapperInterface = await readText(targetDir, `${infrastructure}/DapperRepositories/Base/IDapperBase.cs`);
+    for (const method of ['GetData<T, P>', 'SaveData<T>', 'GetDataMultiple<T, TParams>', 'GetFirstOrDefault<T, P>', 'GetScalar<T, P>']) {
+      expect(dapperInterface).toContain(method);
+    }
+
+    const count = (text: string, needle: string) => text.split(needle).length - 1;
+    const repositories = await readText(targetDir, `${infrastructure}/Extensions/ServiceCollectionExtensions.cs`);
+    expect(count(repositories, 'services.AddScoped<IDapperBase, DapperBase>();')).toBe(1);
+    expect(count(repositories, 'services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));')).toBe(1);
+    expect(count(repositories, 'services.AddScoped<IStudentRepository, StudentRepository>();')).toBe(1);
+    expect(repositories).not.toContain('IDbConnectionFactory');
+    const registration = await readText(targetDir, `${infrastructure}/Extensions/DatabaseServiceCollectionExtensions.cs`);
+    expect(count(registration, 'services.AddSingleton<IDbConnectionFactory, DbConnectionFactory>();')).toBe(1);
+    expect(count(registration, 'services.AddDbContext<ApplicationDbContext>(')).toBe(1);
+
+    const program = await readText(targetDir, 'server/SchoolPortal.Api/Program.cs');
+    expect(program).toContain('AddDatabase(');
+    expect(program).toContain('AddRepositories(');
+
+    expect(await readText(targetDir, 'server/README.md')).toContain(
+      database === 'postgresql' ? 'creates\n  `NpgsqlConnection` instances' : 'creates\n  `SqlConnection` instances',
+    );
+  });
+
+  /** KEY=VALUE lines of a .env file; commented `# KEY=VALUE` lines are returned separately. */
+  function parseEnv(text: string): { values: Record<string, string>; commented: Record<string, string> } {
+    const values: Record<string, string> = {};
+    const commented: Record<string, string> = {};
+    for (const line of text.split(/\r?\n/)) {
+      const match = /^(#\s*)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
+      if (match) (match[1] ? commented : values)[match[2]!] = match[3]!;
+    }
+    return { values, commented };
+  }
+
+  const parseConnectionString = (value: string) =>
+    Object.fromEntries(value.split(';').filter(Boolean).map((part) => part.split('=', 2) as [string, string]));
+
+  it('ships a compose file whose settings come from a git-ignored .env and match the connection string', async () => {
+    const { targetDir, files } = await generateBundled();
+    expect(files).toEqual(expect.arrayContaining(['compose.yaml', '.env', '.env.example', '.gitignore']));
+    const compose = await readText(targetDir, 'compose.yaml');
+    const env = parseEnv(await readText(targetDir, '.env'));
+    const example = await readText(targetDir, '.env.example');
+    const appsettings = JSON.parse(await readText(targetDir, 'server/SchoolPortal.Api/appsettings.json')) as AppSettings;
+    const connection = appsettings.ConnectionStrings.DefaultConnection;
+
+    expect((await readText(targetDir, '.gitignore')).split(/\r?\n/)).toContain('.env');
+    expect(example).not.toContain(secrets.databasePassword);
+    expect(compose).not.toContain(secrets.databasePassword);
+    expect(compose).not.toMatch(/ACCEPT_EULA: "?Y"?$/m);
+
+    const ports = compose.match(/^\s+- "[^"]*"$/gm) ?? [];
+    const portMappings = ports.filter((line) => /:\d+"$/.test(line));
+    expect(portMappings, 'exactly one published port, on loopback').toHaveLength(1);
+    expect(portMappings[0]).toMatch(/- "127\.0\.0\.1:\$\{\w+_PORT:-\d+\}:\d+"$/);
+    expect(compose).toMatch(/^\s+healthcheck:\s*$/m);
+    expect(compose).toMatch(/^volumes:\s*\n\s+[\w-]+-data:\s*$/m);
+
+    if (database === 'postgresql') {
+      expect(compose).toContain('image: postgres:17');
+      expect(compose).toContain('POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?');
+      expect(compose).toContain('POSTGRES_DB: ${POSTGRES_DB:-SchoolPortalDb}');
+      expect(compose).toContain('- postgres-data:/var/lib/postgresql/data');
+      expect(env.values).toEqual({
+        POSTGRES_USER: 'postgres',
+        POSTGRES_PASSWORD: secrets.databasePassword,
+        POSTGRES_DB: 'SchoolPortalDb',
+        POSTGRES_PORT: '5432',
+      });
+      expect(parseConnectionString(connection)).toEqual({
+        Host: 'localhost',
+        Port: env.values.POSTGRES_PORT,
+        Database: env.values.POSTGRES_DB,
+        Username: env.values.POSTGRES_USER,
+        Password: env.values.POSTGRES_PASSWORD,
+      });
+      expect(env.commented.ConnectionStrings__DefaultConnection).toBe(connection);
+    } else {
+      expect(compose).toContain('image: mcr.microsoft.com/mssql/server:2022-latest');
+      expect(compose).toContain('ACCEPT_EULA: ${MSSQL_ACCEPT_EULA:?');
+      expect(compose).toContain('MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?');
+      expect(compose).toContain('MSSQL_PID: Developer');
+      expect(compose).toContain('- sqlserver-data:/var/opt/mssql');
+      expect(compose).not.toContain('POSTGRES_');
+      expect(env.values).toEqual({ MSSQL_ACCEPT_EULA: '', MSSQL_SA_PASSWORD: secrets.databasePassword, MSSQL_PORT: '1433' });
+      expect(connection).toBe(
+        'Server=(localdb)\\mssqllocaldb;Database=SchoolPortalDb;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=true',
+      );
+      expect(parseConnectionString(env.commented.ConnectionStrings__DefaultConnection!)).toEqual({
+        Server: `localhost,${env.values.MSSQL_PORT}`,
+        Database: 'SchoolPortalDb',
+        'User Id': 'sa',
+        Password: env.values.MSSQL_SA_PASSWORD,
+        TrustServerCertificate: 'True',
+        MultipleActiveResultSets: 'true',
+      });
+    }
+
+    const holders = [];
+    for (const file of files) {
+      const text = await readText(targetDir, file);
+      if (text.includes(secrets.databasePassword)) holders.push(file);
+      if (database === 'postgresql') expect(text.toLowerCase().includes('localdb'), file).toBe(false);
+    }
+    expect(holders).toEqual(database === 'postgresql' ? ['.env', 'server/SchoolPortal.Api/appsettings.json'] : ['.env']);
+  });
+
+  it('documents host names that match the compose service: localhost from the host, the service name between containers', async () => {
+    const { targetDir } = await generateBundled();
+    const compose = await readText(targetDir, 'compose.yaml');
+    const readme = await readText(targetDir, 'README.md');
+    const service = /^services:\s*\n\s+([\w-]+):\s*$/m.exec(compose)?.[1];
+    const mapping = /- "127\.0\.0\.1:\$\{(\w+_PORT):-(\d+)\}:(\d+)"$/m.exec(compose);
+    expect(service).toBe(database === 'postgresql' ? 'postgres' : 'sqlserver');
+    const [, portVariable, publishedDefault, containerPort] = mapping!;
+    expect(publishedDefault).toBe(containerPort);
+
+    const fromHost = database === 'postgresql' ? `Host=localhost;Port=<${portVariable}>` : `Server=localhost,<${portVariable}>`;
+    const betweenContainers =
+      database === 'postgresql' ? `Host=${service};Port=${containerPort}` : `Server=${service},${containerPort}`;
+    expect(readme).toContain('#### Which host name to use');
+    expect(readme).toContain(`\`${fromHost}\``);
+    expect(readme).toContain(`\`${betweenContainers}\``);
+    expect(readme).toContain(`through the Compose service name (\`${service}\`), never through \`localhost\``);
+    expect(compose).toContain(betweenContainers);
+    expect(compose).not.toMatch(/^\s+(depends_on|links|network_mode):/m);
+    if (database === 'sqlserver') expect(readme).toContain('`Server=(localdb)\\mssqllocaldb`');
+  });
+
+  it('separates the generated development credentials from production secrets without printing them', async () => {
+    const { targetDir } = await generateBundled();
+    const readme = await readText(targetDir, 'README.md');
+    expect(readme).toContain('### Development credentials and production secrets');
+    expect(readme).toContain('server/SchoolPortal.Infrastructure/Extensions/DataSeeder.cs');
+    for (const variable of ['ConnectionStrings__DefaultConnection', 'Jwt__Key', 'JwtTokenSettings__Key', 'EmailSettings__SmtpPass']) {
+      expect(readme).toContain(`\`${variable}\``);
+    }
+    for (const secret of Object.values(secrets)) expect(readme).not.toContain(secret);
+    expect(existsSync(path.join(targetDir, 'server', 'SchoolPortal.Infrastructure', 'Extensions', 'DataSeeder.cs'))).toBe(true);
+  });
+
+  it('ships VS Code launch configurations and tasks that point at real project files', async () => {
+    const { targetDir, files } = await generateBundled();
+    const readJson = async <T>(file: string) => JSON.parse(await readText(targetDir, file)) as T;
+    expect(files).toEqual(expect.arrayContaining(['.vscode/extensions.json', '.vscode/launch.json', '.vscode/tasks.json']));
+
+    interface Task { label: string; type: string; command?: string; args?: string[]; script?: string; path?: string }
+    interface LaunchConfig { name: string; type: string; preLaunchTask?: string; program?: string; cwd?: string;
+      launchSettingsProfile?: string; envFile?: string; url?: string; webRoot?: string }
+    const extensions = await readJson<{ recommendations: string[] }>('.vscode/extensions.json');
+    const { tasks } = await readJson<{ tasks: Task[] }>('.vscode/tasks.json');
+    const launch = await readJson<{ configurations: LaunchConfig[]; compounds: { configurations: string[] }[] }>(
+      '.vscode/launch.json',
+    );
+    expect(extensions.recommendations).toContain('ms-dotnettools.csharp');
+    expect(new Set(extensions.recommendations).size).toBe(extensions.recommendations.length);
+
+    const strings: string[] = [];
+    const collect = (value: unknown): void => {
+      if (typeof value === 'string') strings.push(value);
+      else if (value && typeof value === 'object') Object.values(value).forEach(collect);
+    };
+    collect([tasks, launch]);
+    for (const value of strings) {
+      expect(value, 'no machine-specific absolute paths').not.toMatch(/^([A-Za-z]:[\\/]|\/(?!\/)|~)/);
+      expect(value).not.toMatch(/ReactDotnetBoilerplate|\\\\/);
+    }
+    const resolve = (value: string) => {
+      expect(value.startsWith('${workspaceFolder}/'), value).toBe(true);
+      return path.join(targetDir, ...value.slice('${workspaceFolder}/'.length).split('/'));
+    };
+    for (const value of strings.filter((s) => s.includes('${workspaceFolder}/') && !s.endsWith('.dll'))) {
+      expect(existsSync(resolve(value)), value).toBe(true);
+    }
+
+    const labels = tasks.map((t) => t.label);
+    expect(new Set(labels).size).toBe(labels.length);
+    const clientPackage = JSON.parse(await readText(targetDir, 'client/package.json')) as { scripts: Record<string, string> };
+    for (const task of tasks) {
+      if (task.type === 'npm') {
+        expect(task.path).toBe('client');
+        expect(clientPackage.scripts[task.script!], task.label).toBeDefined();
+      }
+      if (task.command === 'docker') {
+        expect(task.args?.[0]).toBe('compose');
+        expect(task.args, `${task.label} must not delete data`).not.toContain('down');
+        expect(task.args).not.toEqual(expect.arrayContaining(['-v']));
+      }
+    }
+
+    const launchSettings = JSON.parse(await readText(targetDir, 'server/SchoolPortal.Api/Properties/launchSettings.json')) as {
+      profiles: Record<string, { commandName: string; applicationUrl?: string }>;
+    };
+    const csproj = await readText(targetDir, 'server/SchoolPortal.Api/SchoolPortal.Api.csproj');
+    const targetFramework = /<TargetFramework>([^<]+)<\/TargetFramework>/.exec(csproj)?.[1];
+    const names = launch.configurations.map((c) => c.name);
+    for (const config of launch.configurations) {
+      if (config.preLaunchTask) expect(labels, config.name).toContain(config.preLaunchTask);
+      if (config.type === 'coreclr') {
+        expect(config.program).toBe(
+          `\${workspaceFolder}/server/SchoolPortal.Api/bin/Debug/${targetFramework}/SchoolPortal.Api.dll`,
+        );
+        expect(config.cwd).toBe('${workspaceFolder}/server/SchoolPortal.Api');
+        expect(launchSettings.profiles[config.launchSettingsProfile!]?.commandName).toBe('Project');
+        if (config.envFile) expect(config.envFile).toBe('${workspaceFolder}/.env');
+      }
+      if (config.type === 'chrome') {
+        expect(config.url).toBe('http://localhost:5173');
+        expect(config.webRoot).toBe('${workspaceFolder}/client');
+      }
+    }
+    expect(launch.configurations.filter((c) => c.type === 'coreclr' && !c.envFile)).toHaveLength(1);
+    for (const compound of launch.compounds) {
+      for (const name of compound.configurations) expect(names).toContain(name);
+    }
+    expect(await readText(targetDir, 'client/vite.config.ts')).not.toMatch(/\bport\s*:/);
+  });
+
+  it('wires the client codegen script to the API OpenAPI document and a committed, non-empty output', async () => {
+    const { targetDir, files } = await generateBundled();
+    const clientPackage = JSON.parse(await readText(targetDir, 'client/package.json')) as {
+      scripts: Record<string, string>;
+      devDependencies: Record<string, string>;
+      overrides?: Record<string, Record<string, string>>;
+      pnpm?: { peerDependencyRules?: { allowedVersions?: Record<string, string> } };
+    };
+    expect(clientPackage.scripts.codegen).toBe('node scripts/codegen.mjs');
+    expect(clientPackage.scripts['codegen:test']).toBe('node --test scripts/codegen.test.mjs');
+    expect(files).toEqual(expect.arrayContaining(['client/scripts/codegen.mjs', 'client/scripts/codegen.test.mjs']));
+
+    const generatorRange = clientPackage.devDependencies['openapi-typescript'];
+    expect(generatorRange, 'pinned: the generated file must not change with the npm resolution date').toMatch(/^7\.\d+\.\d+$/);
+    expect(clientPackage.overrides?.['openapi-typescript']).toEqual({ typescript: '$typescript' });
+    const typescriptMajor = /\d+/.exec(clientPackage.devDependencies.typescript ?? '')?.[0];
+    expect(clientPackage.pnpm?.peerDependencyRules?.allowedVersions?.['openapi-typescript>typescript']).toBe(typescriptMajor);
+    const lockfile = await readText(targetDir, 'client/pnpm-lock.yaml');
+    expect(lockfile).toMatch(new RegExp(`^ {6}openapi-typescript:\\r?\\n {8}specifier: ${escapeRegExp(generatorRange!)}\\r?$`, 'm'));
+
+    const script = await readText(targetDir, 'client/scripts/codegen.mjs');
+    const defaultInput = new URL(/const DEFAULT_INPUT = '([^']+)';/.exec(script)?.[1] ?? 'invalid:');
+    const launchSettings = JSON.parse(await readText(targetDir, 'server/SchoolPortal.Api/Properties/launchSettings.json')) as {
+      profiles: Record<string, { applicationUrl?: string }>;
+    };
+    const httpUrls = Object.values(launchSettings.profiles).flatMap((p) => p.applicationUrl?.split(';') ?? []).filter((u) => u.startsWith('http:'));
+    expect(httpUrls, 'Node.js cannot verify the ASP.NET Core dev certificate, so the default must be HTTP').toContain(defaultInput.origin);
+    const swaggerDoc = /c\.SwaggerDoc\("([^"]+)"/.exec(await readText(targetDir, 'server/SchoolPortal.Api/Program.cs'))?.[1];
+    expect(defaultInput.pathname).toBe(`/swagger/${swaggerDoc}/swagger.json`);
+    const projectHint = /dotnet run --project (\S+) --launch-profile (\w+)/.exec(script);
+    expect(existsSync(path.join(targetDir, 'server', projectHint?.[1] ?? 'missing'))).toBe(true);
+    expect(launchSettings.profiles[projectHint?.[2] ?? 'missing']).toBeDefined();
+
+    const outputSegments = /const DEFAULT_OUTPUT = path\.join\(CLIENT_DIR, ([^)]+)\);/.exec(script)?.[1]?.match(/'[^']+'/g)?.map((s) => s.slice(1, -1));
+    expect(outputSegments).toEqual(['src', 'types', 'api.generated.ts']);
+    const marker = /export const GENERATED_MARKER = '([^']+)';/.exec(script)?.[1];
+    const generated = await readText(targetDir, 'client/src/types/api.generated.ts');
+    expect(marker).toBeTruthy();
+    expect(generated.startsWith(`${marker}\n`) || generated.startsWith(`${marker}\r\n`)).toBe(true);
+    expect(generated).toMatch(/^export interface paths \{/m);
+    expect(generated).toMatch(/^export interface components \{/m);
+    const pathKeys = [...generated.matchAll(/^ {4}"(\/[^"]*)": \{/gm)].map((m) => m[1]);
+    expect(pathKeys).toEqual(expect.arrayContaining(['/v1/auth/login', '/v1/students', '/v1/students/{id}']));
+    expect(generated).toMatch(/^ {8}StudentResponse: \{/m);
+
+    expect(await readText(targetDir, 'client/eslint.config.js')).toContain("'src/types/api.generated.ts'");
+  });
 
   it('produces a fully renamed project with no template tokens or source identifiers', async () => {
     const { targetDir, files } = await generateBundled();

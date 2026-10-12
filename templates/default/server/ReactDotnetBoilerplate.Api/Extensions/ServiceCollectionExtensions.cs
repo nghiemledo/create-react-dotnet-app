@@ -1,5 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
-using Microsoft.OpenApi.Models;
+﻿using Microsoft.OpenApi.Models;
 
 namespace ReactDotnetBoilerplate.Api.Extensions
 {
@@ -32,15 +31,6 @@ namespace ReactDotnetBoilerplate.Api.Extensions
                             .SetPreflightMaxAge(TimeSpan.FromMinutes(10));
                     });
             });
-        }
-
-        internal static IServiceCollection AddDatabase(this IServiceCollection services, IConfiguration configuration)
-        {
-            services.AddDbContext<ReactDotnetBoilerplate.Infrastructure.DbContexts.ApplicationDbContext>(options =>
-            {
-                options.UseSqlServer(configuration.GetConnectionString("DefaultConnection"));
-            });
-            return services;
         }
     }
 }

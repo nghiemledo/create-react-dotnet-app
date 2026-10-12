@@ -34,7 +34,9 @@ namespace ReactDotnetBoilerplate.Infrastructure.EFCoreRepositories.Students
                 query = query.Where(x => x.Id != excludeId.Value);
             }
 
-            return query.AnyAsync(x => x.StudentCode == studentCode);
+            // Compared in lower case so SQL Server (case-insensitive collation) and PostgreSQL (case-sensitive) agree.
+            var normalized = studentCode.ToLowerInvariant();
+            return query.AnyAsync(x => x.StudentCode.ToLower() == normalized);
         }
 
         public Task<bool> ExistsByEmailAsync(string email, Guid? excludeId = null)
@@ -45,7 +47,8 @@ namespace ReactDotnetBoilerplate.Infrastructure.EFCoreRepositories.Students
                 query = query.Where(x => x.Id != excludeId.Value);
             }
 
-            return query.AnyAsync(x => x.Email == email);
+            var normalized = email.ToLowerInvariant();
+            return query.AnyAsync(x => x.Email.ToLower() == normalized);
         }
     }
 }

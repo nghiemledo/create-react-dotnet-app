@@ -1,0 +1,6 @@
+# Local settings for docker compose and VS Code. Contains development passwords; see .env.example instead.
+.env
+
+# Visual Studio / Rider state (client/ and server/ have their own .gitignore files)
+.vs/
+.idea/

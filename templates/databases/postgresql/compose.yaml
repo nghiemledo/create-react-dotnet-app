@@ -1,0 +1,30 @@
+# Local development database (PostgreSQL). Not a production setup.
+# Settings come from .env next to this file (docker compose reads it automatically); see .env.example.
+# The API runs on your machine and connects through the published port: Host=localhost;Port=<POSTGRES_PORT>.
+# A service added to this file connects with Host=postgres;Port=5432 (inside a container, localhost is that container).
+#
+#   docker compose up -d --wait   start and wait until the database is healthy
+#   docker compose stop           stop the container, keeping it and its data
+#   docker compose down           remove the container, keeping the data volume
+#   docker compose down -v        remove the container AND DELETE the data volume
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}
+      POSTGRES_DB: ${POSTGRES_DB:-ReactDotnetBoilerplateDb}
+    ports:
+      # Loopback only: reachable from this machine, not from your network.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  postgres-data:

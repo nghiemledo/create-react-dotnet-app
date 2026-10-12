@@ -1,0 +1,38 @@
+# Optional local SQL Server in Docker. Not a production setup.
+# The API's default connection string uses LocalDB (Windows only); use this container on macOS/Linux or if you
+# prefer Docker, and point the API at it (see .env and README.md).
+# From your machine: Server=localhost,<MSSQL_PORT>. From a service added to this file: Server=sqlserver,1433
+# (inside a container, localhost is that container itself).
+#
+# Requirements:
+#   - Docker able to run linux/amd64 images (Apple Silicon runs this image under emulation) and ~2 GB of memory.
+#   - MSSQL_ACCEPT_EULA=Y in .env: you accept the SQL Server license terms (https://hub.docker.com/r/microsoft/mssql-server).
+#   - A strong MSSQL_SA_PASSWORD in .env: at least 8 characters from three of upper case, lower case, digits, symbols.
+#
+#   docker compose up -d --wait   start and wait until SQL Server accepts connections
+#   docker compose stop           stop the container, keeping it and its data
+#   docker compose down           remove the container, keeping the data volume
+#   docker compose down -v        remove the container AND DELETE the data volume
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    environment:
+      ACCEPT_EULA: ${MSSQL_ACCEPT_EULA:?Set MSSQL_ACCEPT_EULA=Y in .env to accept the SQL Server license terms}
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env (see .env.example)}
+      # Developer edition: free, licensed for development and testing only.
+      MSSQL_PID: Developer
+    ports:
+      # Loopback only: reachable from this machine, not from your network.
+      - "127.0.0.1:${MSSQL_PORT:-1433}:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$${MSSQL_SA_PASSWORD}\" -C -Q \"SELECT 1\" -b -o /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  sqlserver-data:

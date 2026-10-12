@@ -9,6 +9,8 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { DATABASES, TEMPLATE_PATHS } from '../src/databases.js';
+import { defaultCommonDir, defaultDatabasesDir } from '../src/paths.js';
 import { isBinary } from '../src/text.js';
 import { discoverSecrets, isExcluded, SOURCE_PATHS, templatePathFor } from './template-rules.js';
 
@@ -22,9 +24,11 @@ const FORBIDDEN: [string, RegExp][] = [
   ['certificate/key', /\.(pfx|p12|pem|key|snk)$/i],
   ['log file', /\.log$/i],
   ['npm credentials', /(^|\/)\.npmrc$/],
-  ['build output', /^templates\/default\/client\/dist\//],
+  ['build output', /^templates\/(default|databases\/[^/]+)\/client\/dist\//],
   ['dev-only source', /^(src|tests|scripts)\//],
   ['sync staging', /^templates\/\.sync-/],
+  ['stored .env outside the database overlays', /^(?!templates\/databases\/[^/]+\/_env$).*(^|\/)_env$/],
+  ['stored .vscode outside the common overlay', /^(?!templates\/common\/_vscode\/).*(^|\/)_vscode\//],
   ['uploaded user file', /wwwroot\/uploads\/.+(?<!\.gitkeep)$/],
 ];
 
@@ -103,6 +107,38 @@ async function main(): Promise<void> {
     files.some((f) => f.endsWith('wwwroot/uploads/users/.gitkeep')),
     'hidden template file present: wwwroot/uploads/users/.gitkeep',
   );
+
+  // Overlays: exactly the files in this repository's templates/databases and templates/common
+  const overlayExpected = [
+    ...(await walk(defaultDatabasesDir)).map((f) => `templates/databases/${f}`),
+    ...(await walk(defaultCommonDir)).map((f) => `templates/common/${f}`),
+  ];
+  const overlayPackaged = files.filter((f) => f.startsWith('templates/databases/') || f.startsWith('templates/common/'));
+  const overlayMissing = overlayExpected.filter((f) => !files.includes(f));
+  const overlayExtra = overlayPackaged.filter((f) => !overlayExpected.includes(f));
+  check(overlayMissing.length === 0, `all ${overlayExpected.length} database overlay files are present${overlayMissing.length ? `; missing: ${overlayMissing.join(', ')}` : ''}`);
+  check(overlayExtra.length === 0, `no unexpected database overlay files${overlayExtra.length ? `: ${overlayExtra.join(', ')}` : ''}`);
+  for (const [database, info] of Object.entries(DATABASES)) {
+    if (info.replacesPrefix !== TEMPLATE_PATHS.migrations) continue;
+    const migrations = `templates/databases/${info.overlay}/${TEMPLATE_PATHS.migrations}`;
+    check(
+      files.some((f) => f.startsWith(migrations) && f.endsWith('ModelSnapshot.cs')),
+      `${database} overlay ships its own migrations`,
+    );
+  }
+  const passwordSettings: Record<string, RegExp> = {
+    sqlserver: /^\s+MSSQL_SA_PASSWORD: \$\{MSSQL_SA_PASSWORD:\?[^}]+\}\r?$/m,
+    postgresql: /^\s+POSTGRES_PASSWORD: \$\{POSTGRES_PASSWORD:\?[^}]+\}\r?$/m,
+  };
+  for (const [database, info] of Object.entries(DATABASES)) {
+    const read = (file: string) =>
+      fs.readFile(path.join(root, `templates/databases/${info.overlay}/${file}`), 'utf8').catch(() => '');
+    const compose = await read('compose.yaml');
+    check(passwordSettings[database]?.test(compose) ?? false, `${database} compose.yaml takes its password from .env, not a literal`);
+    check(/127\.0\.0\.1:\$\{\w+_PORT:-\d+\}:\d+/.test(compose), `${database} compose.yaml publishes its port on 127.0.0.1 only`);
+    check(/^\w+_PASSWORD=__DB_PASSWORD__\r?$/m.test(await read('_env')), `${database} generated .env gets a per-project password token`);
+    check(!(await read('.env.example')).includes('__DB_PASSWORD__'), `${database} .env.example holds placeholders only`);
+  }
 
   // Secrets: original source values must not appear anywhere in the package
   const show = (p: string) => git('show', `${commit}:${p}`).toString('utf8');

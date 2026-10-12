@@ -6,7 +6,8 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // api.generated.ts is written by `npm run codegen`; fix the API or the generator, not the file.
+  globalIgnores(['dist', 'src/types/api.generated.ts']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
