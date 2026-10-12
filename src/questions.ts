@@ -70,7 +70,11 @@ async function chooseDatabase({ given, interactive, prompter }: QuestionContext)
   }
   return prompter.select<Database>({
     message: 'Database:',
-    choices: SUPPORTED_DATABASES.map((database) => ({ name: DATABASES[database].promptLabel, value: database })),
+    choices: SUPPORTED_DATABASES.map((database) => ({
+      name: DATABASES[database].name,
+      value: database,
+      ...DATABASES[database].prompt,
+    })),
     default: DEFAULT_DATABASE,
   });
 }
@@ -193,7 +197,7 @@ async function choosePackageManager({ given, interactive, prompter, tools }: Que
   }
   return prompter.select<PackageManager>({
     message: 'Frontend package manager:',
-    choices: installed.map((pm) => ({ name: PACKAGE_MANAGERS[pm].label, value: pm })),
+    choices: installed.map((pm) => ({ name: pm, value: pm, ...PACKAGE_MANAGERS[pm].prompt })),
     default: preferred,
   });
 }

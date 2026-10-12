@@ -1,6 +1,6 @@
 import { CancelledError } from '../src/errors.js';
 import type { CommandResult, CommandRunner, RunOptions, ToolProbe } from '../src/process.js';
-import type { Prompter } from '../src/prompter.js';
+import type { Choice, Prompter } from '../src/prompter.js';
 
 export interface FakeTools {
   pnpm?: boolean;
@@ -65,6 +65,8 @@ export interface AskedQuestion {
   choices?: unknown[];
   /** Labels shown for select choices, in order. */
   labels?: string[];
+  badges?: (string | undefined)[];
+  descriptions?: (string | undefined)[];
   default?: unknown;
   /** Text answers the validator rejected before one was accepted. */
   rejected: string[];
@@ -102,11 +104,19 @@ export function scriptedPrompter(script: ScriptedAnswer[]): Prompter & { asked: 
           record.rejected.push(value);
         }
       }),
-    select: <T>(question: { message: string; choices: { name: string; value: T }[]; default?: T }) =>
+    select: <T>(question: { message: string; choices: Choice<T>[]; default?: T }) =>
       settle(() => {
         const choices = question.choices.map((choice) => choice.value);
-        const labels = question.choices.map((choice) => choice.name);
-        asked.push({ kind: 'select', message: question.message, choices, labels, default: question.default, rejected: [] });
+        asked.push({
+          kind: 'select',
+          message: question.message,
+          choices,
+          labels: question.choices.map((choice) => choice.name),
+          badges: question.choices.map((choice) => choice.badge),
+          descriptions: question.choices.map((choice) => choice.description),
+          default: question.default,
+          rejected: [],
+        });
         const answer = next(question.message);
         if (!choices.includes(answer as T)) {
           throw new Error(`"${String(answer)}" is not offered for "${question.message}" (offered: ${choices.join(', ')})`);

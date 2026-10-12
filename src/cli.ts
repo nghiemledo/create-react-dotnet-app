@@ -13,6 +13,7 @@ import { inquirerPrompter, type Prompter } from './prompter.js';
 import { collectAnswers, type Answers } from './questions.js';
 import { initializeGitRepository, installFrontendDependencies, skippedStep, type StepResult } from './steps.js';
 import { printNextSteps, printSummary } from './summary.js';
+import { bannerLines } from './ui.js';
 
 interface CliOptions {
   displayName?: string;
@@ -86,6 +87,11 @@ export async function main(argv: string[] = process.argv, overrides: Partial<Run
   const options = program.opts<CliOptions>();
   const interactive =
     runtime.interactive ?? (!options.yes && Boolean(process.stdin.isTTY && process.stdout.isTTY));
+  if (interactive) {
+    log.info('');
+    for (const line of bannerLines(readVersion())) log.info(line);
+    log.info('');
+  }
 
   const tools = detectTools(runtime.probe, runtime.nodeVersion);
   const answers = await collectAnswers({
@@ -136,7 +142,7 @@ export async function main(argv: string[] = process.argv, overrides: Partial<Run
     );
   }
 
-  printSummary(steps);
+  printSummary(steps, answers.projectName);
   printNextSteps({
     targetDir: result.targetDir,
     pascalName: result.pascalName,

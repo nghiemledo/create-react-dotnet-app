@@ -27,7 +27,7 @@ export interface ProviderEdit {
 export interface DatabaseInfo {
   /** Shown in prompts and documentation. */
   name: string;
-  promptLabel: string;
+  prompt: { badge: string; description: string };
   efCorePackage: { id: string; version: string };
   edits: ProviderEdit[];
   /**
@@ -51,14 +51,24 @@ const SQLSERVER_CONNECTION =
 export const DATABASES: Record<Database, DatabaseInfo> = {
   sqlserver: {
     name: 'SQL Server',
-    promptLabel: 'SQL Server (LocalDB on Windows by default)',
+    prompt: {
+      badge: 'Default · LocalDB on Windows',
+      description:
+        'EF Core with the SqlClient provider (Microsoft.Data.SqlClient); Dapper uses SqlConnection. ' +
+        'LocalDB needs no setup on Windows; an optional SQL Server container is included for macOS/Linux.',
+    },
     efCorePackage: { id: 'Microsoft.EntityFrameworkCore.SqlServer', version: '9.0.18' },
     edits: [],
     overlay: 'sqlserver',
   },
   postgresql: {
     name: 'PostgreSQL',
-    promptLabel: 'PostgreSQL (includes a Docker Compose file for local development)',
+    prompt: {
+      badge: 'Recommended for macOS / Linux',
+      description:
+        'EF Core with the Npgsql provider; Dapper uses NpgsqlConnection. ' +
+        'Includes a Docker Compose file for a local PostgreSQL 17 database.',
+    },
     // 9.0.x is the newest line for EF Core 9 / net9.0; 10.x requires net10.0 and EF Core 10.
     efCorePackage: { id: 'Npgsql.EntityFrameworkCore.PostgreSQL', version: '9.0.4' },
     edits: [

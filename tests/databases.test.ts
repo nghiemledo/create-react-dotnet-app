@@ -98,6 +98,27 @@ describe('next steps', () => {
     expect(text).toContain('docker compose up -d --wait');
   });
 
+  it.each(SUPPORTED_DATABASES)('numbers the steps and gives backend and frontend commands (%s)', (database) => {
+    const lines = nextStepLines({ ...context, database });
+    const steps = lines.filter((line) => /^ {2}\d\. /.test(line)).map((line) => line.trim().slice(0, 2));
+    expect(steps).toEqual(['1.', '2.', '3.']);
+    expect(lines).toContain('       dotnet run --project MyApp.Api --launch-profile https');
+    expect(lines).toContain('       pnpm dev');
+    expect(lines.join('\n')).toContain('Full stack: API + Vite');
+  });
+
+  it('puts the seeded password in an aligned callout box', () => {
+    const lines = nextStepLines({ ...context, database: 'postgresql' });
+    const top = lines.findIndex((line) => line.startsWith('╭─ Seeded development accounts'));
+    const bottom = lines.findIndex((line) => line.startsWith('╰'));
+    expect(top).toBeGreaterThan(0);
+    const callout = lines.slice(top, bottom + 1);
+    expect(callout.some((line) => line.includes('Password: SeedPw'))).toBe(true);
+    expect(callout.join('\n')).toContain('server/MyApp.Infrastructure/Extensions/DataSeeder.cs');
+    expect(new Set(callout.map((line) => line.length)).size).toBe(1);
+    expect(callout.slice(1, -1).every((line) => line.startsWith('│ ') && line.endsWith(' │'))).toBe(true);
+  });
+
   it.each(SUPPORTED_DATABASES)('states that the CLI never touches a database (%s)', (database) => {
     const text = nextStepLines({ ...context, database }).join('\n');
     expect(text).toContain('This tool does not run migrations or touch any database.');

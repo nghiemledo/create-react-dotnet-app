@@ -1,11 +1,11 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { CommanderError } from 'commander';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { main, type Runtime } from '../src/cli.js';
 import { CancelledError, CliError } from '../src/errors.js';
-import { defaultTemplateDir } from '../src/paths.js';
+import { defaultTemplateDir, packageRoot } from '../src/paths.js';
 import { INITIAL_COMMIT_MESSAGE } from '../src/steps.js';
 import { CANCEL, fakeProbe, fakeRunner, scriptedPrompter, type FakeTools, type ScriptedAnswer } from './fakes.js';
 import { listFiles, makeTempDir, writeFiles } from './helpers.js';
@@ -130,7 +130,13 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
 
       await main(argv(target), runtime({ interactive: true, prompter }));
 
-      expect(prompter.asked[1]).toMatchObject({ kind: 'select', choices: ['pnpm', 'npm'] });
+      expect(prompter.asked[1]).toMatchObject({
+        kind: 'select',
+        choices: ['pnpm', 'npm'],
+        labels: ['pnpm', 'npm'],
+        badges: ['exact versions from the template lockfile', 'resolves versions from package.json'],
+      });
+      expect(prompter.asked[1]!.descriptions![0]).toContain('--frozen-lockfile');
     });
 
     it('rejects unsupported package managers', async () => {
@@ -175,12 +181,15 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
         kind: 'select',
         message: 'Database:',
         choices: ['sqlserver', 'postgresql'],
-        labels: [
-          'SQL Server (LocalDB on Windows by default)',
-          'PostgreSQL (includes a Docker Compose file for local development)',
-        ],
+        labels: ['SQL Server', 'PostgreSQL'],
+        badges: ['Default · LocalDB on Windows', 'Recommended for macOS / Linux'],
         default: 'sqlserver',
       });
+      const [sqlServerHelp, postgresHelp] = prompter.asked[1]!.descriptions!;
+      expect(sqlServerHelp).toContain('SqlClient');
+      expect(sqlServerHelp).toContain('SqlConnection');
+      expect(postgresHelp).toContain('Npgsql provider');
+      expect(postgresHelp).toContain('NpgsqlConnection');
       expect(summary.database).toBe('postgresql');
       expect(await infrastructureProject(target)).toContain('Npgsql.EntityFrameworkCore.PostgreSQL');
       expect(existsSync(path.join(target, 'compose.yaml'))).toBe(true);
@@ -297,6 +306,45 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
       await expect(main(argv(), runtime({ interactive: true, prompter, run }))).rejects.toThrow(CancelledError);
       expect(existsSync(target)).toBe(false);
       expect(run.calls).toEqual([]);
+    });
+  });
+
+  describe('terminal output', () => {
+    const printed = () =>
+      vi
+        .mocked(console.log)
+        .mock.calls.map((args) => String(args[0]))
+        .join('\n');
+    const version = (JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8')) as { version: string })
+      .version;
+
+    it('shows the welcome banner with the version before the first question in interactive mode', async () => {
+      const prompter = scriptedPrompter([await newTarget(), 'postgresql', 'pnpm', false, false]);
+      await main(argv(), runtime({ interactive: true, prompter }));
+
+      const lines = printed().split('\n');
+      const bannerAt = lines.findIndex((line) => line.includes(`create-react-dotnet-app v${version}`));
+      expect(bannerAt).toBeGreaterThanOrEqual(0);
+      expect(lines[bannerAt + 1]).toContain('React 19 + ASP.NET Core 9');
+      expect(bannerAt).toBeLessThan(lines.findIndex((line) => line.includes('Creating')));
+    });
+
+    it('prints no banner with --yes, but still the summary, the password callout and the next steps', async () => {
+      await main(argv(await newTarget(), '--yes', '--no-install', '--no-git'), runtime());
+
+      const text = printed();
+      expect(text).not.toContain('create-react-dotnet-app v');
+      expect(text).toContain('my-app is ready');
+      expect(text).toContain('Seeded development accounts');
+      expect(text).toContain('1. Database:');
+      expect(text.includes('\u001b[')).toBe(false);
+    });
+
+    it('flags a run with a failed step instead of calling the project ready', async () => {
+      const run = fakeRunner((call) => (call.command === 'pnpm' ? { exitCode: 1 } : {}));
+      await main(argv(await newTarget(), '--no-git'), runtime({ run }));
+      expect(printed()).toContain('my-app was created, but some steps need attention');
+      expect(printed()).not.toContain('my-app is ready');
     });
   });
 
