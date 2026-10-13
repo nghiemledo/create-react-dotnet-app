@@ -3,10 +3,11 @@ import path from 'node:path';
 import { Command, Option } from 'commander';
 import { DATABASES, SUPPORTED_DATABASES, type Database } from './databases.js';
 import { CliError } from './errors.js';
+import { FRONTENDS, SUPPORTED_FRONTENDS, type Frontend } from './frontends.js';
 import { generateProject, type GenerateResult } from './generate.js';
 import { log } from './log.js';
 import { SUPPORTED_PACKAGE_MANAGERS, type PackageManager } from './package-managers.js';
-import { defaultDatabasesDir, defaultTemplateDir, packageRoot } from './paths.js';
+import { defaultDatabasesDir, defaultFrontendsDir, defaultTemplateDir, packageRoot } from './paths.js';
 import { detectTools } from './prerequisites.js';
 import { probeCommand, runCommand, type CommandRunner, type ToolProbe } from './process.js';
 import { inquirerPrompter, type Prompter } from './prompter.js';
@@ -17,6 +18,7 @@ import { bannerLines } from './ui.js';
 
 interface CliOptions {
   displayName?: string;
+  frontend?: Frontend;
   db?: Database;
   pm?: PackageManager;
   install?: boolean;
@@ -31,6 +33,7 @@ export interface Runtime {
   probe: ToolProbe;
   templateDir: string;
   databasesDir: string;
+  frontendsDir: string;
   nodeVersion: string;
   /** Defaults to: stdin and stdout are TTYs and --yes was not passed. */
   interactive?: boolean;
@@ -40,6 +43,7 @@ export interface RunSummary {
   targetDir: string;
   projectName: string;
   pascalName: string;
+  frontend: Frontend;
   database: Database;
   steps: StepResult[];
 }
@@ -52,9 +56,14 @@ function readVersion(): string {
 export function createProgram(): Command {
   return new Command()
     .name('create-react-dotnet-app')
-    .description('Create a React + ASP.NET Core (.NET 9) project.')
+    .description('Create a React (Vite or Next.js) + ASP.NET Core (.NET 9) project.')
     .version(readVersion())
     .argument('[project-name]', 'name of the directory to create, e.g. my-app (a path is also accepted)')
+    .addOption(
+      new Option('--frontend <framework>', 'frontend framework (default when not prompting: vite)').choices(
+        SUPPORTED_FRONTENDS,
+      ),
+    )
     .addOption(
       new Option('--db <database>', 'database provider for the API (default when not prompting: sqlserver)').choices(
         SUPPORTED_DATABASES,
@@ -78,6 +87,7 @@ export async function main(argv: string[] = process.argv, overrides: Partial<Run
     probe: probeCommand,
     templateDir: defaultTemplateDir,
     databasesDir: defaultDatabasesDir,
+    frontendsDir: defaultFrontendsDir,
     nodeVersion: process.version,
     ...overrides,
   };
@@ -97,6 +107,7 @@ export async function main(argv: string[] = process.argv, overrides: Partial<Run
   const answers = await collectAnswers({
     given: {
       directory: program.args[0],
+      frontend: options.frontend,
       database: options.db,
       packageManager: options.pm,
       install: options.install,
@@ -107,13 +118,14 @@ export async function main(argv: string[] = process.argv, overrides: Partial<Run
     tools,
     templateDir: runtime.templateDir,
     databasesDir: runtime.databasesDir,
+    frontendsDir: runtime.frontendsDir,
     probe: runtime.probe,
   });
 
   if (!tools.nodeSupported) {
     log.warn(
-      `Node ${tools.nodeVersion} is below what the generated client needs (^20.19, ^22.13 or >=24); ` +
-        'its build and lint may fail until you upgrade.',
+      `Node ${tools.nodeVersion} is below what the generated client needs (^20.19, ^22.13 or >=24 for ` +
+        `${FRONTENDS[answers.frontend].nodeRequirementSource}); its build and lint may fail until you upgrade.`,
     );
   }
   if (!tools.dotnetSdk) {
@@ -146,6 +158,7 @@ export async function main(argv: string[] = process.argv, overrides: Partial<Run
   printNextSteps({
     targetDir: result.targetDir,
     pascalName: result.pascalName,
+    frontend: answers.frontend,
     database: answers.database,
     packageManager: answers.packageManager,
     dependenciesInstalled: install.status === 'done',
@@ -157,6 +170,7 @@ export async function main(argv: string[] = process.argv, overrides: Partial<Run
     targetDir: result.targetDir,
     projectName: answers.projectName,
     pascalName: result.pascalName,
+    frontend: answers.frontend,
     database: answers.database,
     steps,
   };
@@ -167,14 +181,19 @@ async function generate(answers: Answers, displayName: string, runtime: Runtime)
   const onInterrupt = () => controller.abort();
   process.once('SIGINT', onInterrupt);
 
-  log.step(`Creating ${log.bold(answers.projectName)} (${DATABASES[answers.database].name}) in ${answers.targetDir}`);
+  log.step(
+    `Creating ${log.bold(answers.projectName)} (${FRONTENDS[answers.frontend].name}, ` +
+      `${DATABASES[answers.database].name}) in ${answers.targetDir}`,
+  );
   try {
     return await generateProject({
       templateDir: runtime.templateDir,
       databasesDir: runtime.databasesDir,
+      frontendsDir: runtime.frontendsDir,
       targetDir: answers.targetDir,
       projectName: answers.projectName,
       displayName,
+      frontend: answers.frontend,
       database: answers.database,
       packageManager: answers.packageManager,
       allowNonEmpty: answers.allowNonEmpty,

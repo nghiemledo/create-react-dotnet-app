@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { DATABASES, DEFAULT_DATABASE, SUPPORTED_DATABASES, type Database } from './databases.js';
 import { CancelledError, CliError } from './errors.js';
+import { DEFAULT_FRONTEND, FRONTENDS, SUPPORTED_FRONTENDS, type Frontend } from './frontends.js';
 import {
   inspectDestination,
   nonEmptyDirectoryMessage,
@@ -17,6 +18,7 @@ import type { Prompter } from './prompter.js';
 
 export interface GivenOptions {
   directory?: string;
+  frontend?: Frontend;
   database?: Database;
   packageManager?: PackageManager;
   /** `undefined` means "ask" (interactive) or "yes" (non-interactive). */
@@ -28,6 +30,7 @@ export interface Answers {
   targetDir: string;
   projectName: string;
   allowNonEmpty: boolean;
+  frontend: Frontend;
   database: Database;
   packageManager: PackageManager;
   install: boolean;
@@ -43,6 +46,7 @@ export interface QuestionContext {
   tools: Tools;
   templateDir: string;
   databasesDir?: string;
+  frontendsDir?: string;
   probe: ToolProbe;
 }
 
@@ -50,15 +54,35 @@ type ExistingDirectoryAction = 'rename' | 'merge' | 'cancel';
 
 /**
  * Resolves every decision before any file is written, so cancelling at a prompt never leaves files behind.
- * Order: project name -> database -> package manager -> install -> git.
+ * Order: project name -> frontend -> database -> package manager -> install -> git.
  */
 export async function collectAnswers(context: QuestionContext): Promise<Answers> {
   const destination = await resolveDestination(context);
+  const frontend = await chooseFrontend(context);
   const database = await chooseDatabase(context);
   const packageManager = await choosePackageManager(context);
   const install = await decideInstall(context, packageManager);
   const git = await decideGit(context, destination.targetDir);
-  return { ...destination, database, packageManager, ...install, ...git };
+  return { ...destination, frontend, database, packageManager, ...install, ...git };
+}
+
+/** Without a prompt the answer is always React + Vite, which is what earlier versions generated. */
+async function chooseFrontend({ given, interactive, prompter }: QuestionContext): Promise<Frontend> {
+  if (given.frontend) {
+    return given.frontend;
+  }
+  if (!interactive) {
+    return DEFAULT_FRONTEND;
+  }
+  return prompter.select<Frontend>({
+    message: 'Frontend:',
+    choices: SUPPORTED_FRONTENDS.map((frontend) => ({
+      name: FRONTENDS[frontend].name,
+      value: frontend,
+      ...FRONTENDS[frontend].prompt,
+    })),
+    default: DEFAULT_FRONTEND,
+  });
 }
 
 async function chooseDatabase({ given, interactive, prompter }: QuestionContext): Promise<Database> {
@@ -79,20 +103,27 @@ async function chooseDatabase({ given, interactive, prompter }: QuestionContext)
   });
 }
 
-/** The database is chosen after the destination, so conflicts are checked against every possible project file. */
+/**
+ * The frontend and database are chosen after the destination, so conflicts are checked against every possible
+ * project file.
+ */
 async function planAllVariants(context: QuestionContext, pascalName: string): Promise<PlannedFile[]> {
   const byDestination = new Map<string, PlannedFile>();
-  for (const database of SUPPORTED_DATABASES) {
-    // pnpm's plan is a superset of npm's (it includes the lockfile).
-    const plan = await planProject({
-      templateDir: context.templateDir,
-      databasesDir: context.databasesDir,
-      pascalName,
-      packageManager: 'pnpm',
-      database,
-    });
-    for (const file of plan) {
-      byDestination.set(file.destinationPath, file);
+  for (const frontend of SUPPORTED_FRONTENDS) {
+    for (const database of SUPPORTED_DATABASES) {
+      // pnpm's plan is a superset of npm's (it includes the lockfile).
+      const plan = await planProject({
+        templateDir: context.templateDir,
+        databasesDir: context.databasesDir,
+        frontendsDir: context.frontendsDir,
+        pascalName,
+        packageManager: 'pnpm',
+        database,
+        frontend,
+      });
+      for (const file of plan) {
+        byDestination.set(file.destinationPath, file);
+      }
     }
   }
   return [...byDestination.values()];

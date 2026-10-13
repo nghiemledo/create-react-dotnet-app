@@ -1,6 +1,6 @@
 # Hướng Dẫn Luồng CRUD Full-Stack (Backend -> Frontend)
 
-> Tài liệu hướng dẫn luồng chuẩn phát triển tính năng CRUD từ Backend (ASP.NET Core 9 Clean Architecture) đến Frontend (React + Vite + TanStack Query + TailwindCSS). Dành cho thành viên mới trong team dev.
+> Tài liệu hướng dẫn luồng chuẩn phát triển tính năng CRUD từ Backend (ASP.NET Core 9 Clean Architecture) đến Frontend (<!-- crda:frontend-summary -->React + Vite<!-- /crda:frontend-summary --> + TanStack Query + TailwindCSS). Dành cho thành viên mới trong team dev.
 
 ---
 
@@ -78,7 +78,9 @@ Tất cả API BE đều trả về cấu trúc bọc `Result<T>`:
 
 1. **Frontend (Chặn hiển thị UI):**
   - `canManageStudents(role)` kiểm tra nếu không phải `ADMIN`/`TEACHER` thì ẩn nút Thêm, ẩn nút Xóa, khóa form `readOnly`.
+<!-- crda:frontend-role-route -->
   - Route `/students/create` được bọc bởi `<RoleRoute allowedRoles={['ADMIN', 'TEACHER']} />`.
+<!-- /crda:frontend-role-route -->
 2. **Backend (Chặn bảo mật thực tế):**
   - Class Controller: `[Authorize]` (bắt buộc phải có Bearer Token, không có ➔ `401 Unauthorized`).
   - Action Thêm/Sửa/Xóa: `[Authorize(Roles = "SysAdmin,Admin,Teacher")]` (User thường gọi vào ➔ `403 Forbidden`).
@@ -150,6 +152,7 @@ Tất cả API BE đều trả về cấu trúc bọc `Result<T>`:
 
 
 
+<!-- crda:frontend-crud-steps -->
 ## 5. Các Bước Triển Khai Frontend (Client React)
 
 Mỗi tính năng được gom gọn trong thư mục feature riêng biệt `client/src/pages/<FeatureName>/`.
@@ -203,6 +206,7 @@ client/src/pages/Students/
      </Route>
    </Route>
   ```
+<!-- /crda:frontend-crud-steps -->
 
 ---
 
@@ -271,5 +275,7 @@ Khi cần tạo thêm một chức năng CRUD mới (Ví dụ: `Teacher`, `Cours
 - [ ] **DI:** Đăng ký Repository và Service vào `ServiceCollectionExtensions.cs`.
 - [ ] **FE Types & Schema:** Tạo `types.ts`, `schema.ts` (Zod).
 - [ ] **FE Api & Query:** Tạo `api.ts`, `queryKeys.ts`, các hooks `useQuery` và `useMutation`.
+<!-- crda:frontend-checklist -->
 - [ ] **FE Components & Pages:** Tạo Table, Filter, Form, ListPage, DetailPage, CreatePage.
 - [ ] **FE Routes:** Khai báo đường dẫn trong `routePaths.ts` và đăng ký vào `AppRoutes.tsx`.
+<!-- /crda:frontend-checklist -->

@@ -1,15 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
   DOC_PLACEHOLDERS,
+  FRONTEND_SOURCE_DIRS,
   SOURCE_PATHS,
   TemplateDriftError,
   discoverSecrets,
   isExcluded,
+  packagedPathFor,
   removeForeignGitignoreEntries,
   sanitizeAppsettings,
   sanitizeLoginPage,
   sanitizeSourceFiles,
+  templateTargetFor,
 } from '../scripts/template-rules.js';
+import { FRONTENDS } from '../src/frontends.js';
 import { TEMPLATE_TOKENS } from '../src/tokens.js';
 import type { AppSettings } from './helpers.js';
 
@@ -137,5 +141,55 @@ describe('sanitizeSourceFiles', () => {
     const files = sourceFiles();
     files.delete(SOURCE_PATHS.dataSeeder);
     expect(() => sanitizeSourceFiles(files)).toThrow(TemplateDriftError);
+  });
+});
+
+describe('frontend sources', () => {
+  it('routes client-next/ to the client/ of the Next.js overlay and everything else to templates/default', () => {
+    expect(templateTargetFor('client-next/src/app/page.tsx')).toEqual({ frontendOverlay: 'nextjs', templatePath: 'client/src/app/page.tsx' });
+    expect(templateTargetFor('client-next/.gitignore')).toEqual({ frontendOverlay: 'nextjs', templatePath: 'client/_gitignore' });
+    expect(templateTargetFor('client/src/main.tsx')).toEqual({ templatePath: 'client/src/main.tsx' });
+    expect(templateTargetFor('client-nextgen/x.ts')).toEqual({ templatePath: 'client-nextgen/x.ts' });
+    expect(packagedPathFor('client-next/package.json')).toBe('templates/frontends/nextjs/client/package.json');
+    expect(packagedPathFor('server/.gitignore')).toBe('templates/default/server/_gitignore');
+    expect(Object.values(FRONTENDS).filter((info) => info.overlay).map((info) => info.overlay)).toEqual(
+      Object.keys(FRONTEND_SOURCE_DIRS),
+    );
+  });
+
+  it.each([
+    'scripts/check-client-next-shared.mjs',
+    'client-next/.next/cache/x.json',
+    'client-next/out/index.html',
+    'client-next/next-env.d.ts',
+    'client-next/tsconfig.tsbuildinfo',
+    'client-next/node_modules/next/package.json',
+    'client-next/.env',
+    'client-next/.env.local',
+  ])('excludes %s', (p) => expect(isExcluded(p)).toBe(true));
+
+  it.each(['client-next/.env.example', 'client-next/scripts/codegen.mjs', 'client/scripts/codegen.mjs'])('keeps %s', (p) =>
+    expect(isExcluded(p)).toBe(false),
+  );
+
+  it('sanitizes the Next.js client into its own file set', () => {
+    const { files, frontendFiles } = sanitizeSourceFiles(
+      sourceFiles({
+        'client-next/package.json': '{ "name": "training-management-client" }',
+        'client-next/.gitignore': '.next/\n',
+        'client-next/README.md': `Seeded password: ${FAKE_PASSWORD}`,
+        'client-next/.env.local': `NEXT_PUBLIC_X=${FAKE_KEY}`,
+      }),
+    );
+    const next = frontendFiles.get('nextjs');
+    expect([...(next?.keys() ?? [])].sort()).toEqual(['client/README.md', 'client/_gitignore', 'client/package.json']);
+    expect(next?.get('client/README.md')?.toString('utf8')).toBe(`Seeded password: ${DOC_PLACEHOLDERS.seedUserPassword}`);
+    expect([...files.keys()].some((p) => p.startsWith('client-next/'))).toBe(false);
+  });
+
+  it('refuses to produce a template when a secret survives in the Next.js client', () => {
+    expect(() =>
+      sanitizeSourceFiles(sourceFiles({ 'client-next/src/config/leak.ts': `export const k = '${FAKE_KEY}';` })),
+    ).toThrow(/frontends\/nextjs\/client\/src\/config\/leak\.ts/);
   });
 });

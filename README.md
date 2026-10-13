@@ -32,7 +32,7 @@
 ![ESLint](https://img.shields.io/badge/ESLint-flat_config-4B32C3?logo=eslint&logoColor=white)
 ![Vitest](https://img.shields.io/badge/Vitest-tested-6E9F18?logo=vitest&logoColor=white)
 
-An interactive CLI to instantly scaffold production-ready full-stack applications with **React 19 (Vite, TypeScript, Tailwind CSS v4, Shadcn/ui)** and **ASP.NET Core (.NET 9) Clean Architecture Web API**.
+An interactive CLI to instantly scaffold production-ready full-stack applications with **React 19 (Vite or Next.js, TypeScript, Tailwind CSS v4, Shadcn/ui)** and **ASP.NET Core (.NET 9) Clean Architecture Web API**. Both frontends use the same backend, databases and tooling.
 
 The starter template is self-contained directly inside the npm package — zero network requests or GitHub dependencies at generation time.
 
@@ -46,7 +46,7 @@ You can generate a new application interactively with a single command:
 npx create-react-dotnet-app my-app
 ```
 
-Or run without arguments to launch the guided prompt (project name, database, package manager, install, Git):
+Or run without arguments to launch the guided prompt (project name, frontend, database, package manager, install, Git):
 
 ```bash
 npx create-react-dotnet-app
@@ -58,6 +58,7 @@ Pass options with `--yes` (`-y`) to skip all interactive prompts:
 
 ```bash
 npx create-react-dotnet-app my-app --yes --db postgresql --pm pnpm --install --git
+npx create-react-dotnet-app my-app --yes --frontend nextjs --db postgresql
 ```
 
 #### Available CLI Flags
@@ -65,6 +66,7 @@ npx create-react-dotnet-app my-app --yes --db postgresql --pm pnpm --install --g
 | Flag | Description | Default |
 | --- | --- | --- |
 | `[project-name]` | Target folder & app identifier (e.g. `my-app` → `MyApp`) | Interactive prompt |
+| `--frontend <framework>` | Frontend: `vite` (React + Vite) or `nextjs` (Next.js App Router); any other value is rejected before anything is written | Interactive prompt; `vite` with `--yes` or without a terminal |
 | `--db <database>` | Database provider: `sqlserver` or `postgresql` | Interactive prompt; `sqlserver` with `--yes` |
 | `--pm <manager>` | Frontend package manager: `pnpm` or `npm` | `pnpm` if installed, otherwise `npm` |
 | `--install` / `--no-install` | Install frontend dependencies immediately | `--install` |
@@ -115,19 +117,22 @@ dotnet run --project MyApp.Api --launch-profile https
 * **Swagger UI:** `https://localhost:7001/swagger` (or `http://localhost:5058/swagger`)
 * **Admin Login:** The CLI generates a unique random password for your local seeded development account and prints it in the terminal summary.
 
-### 3. Start the Frontend (React 19 + Vite)
+### 3. Start the Frontend
+
+The frontend is always in `client/`, with the same commands for both frameworks:
 
 ```bash
 cd my-app/client
 # If not installed during setup:
 pnpm install # or npm install
 
-# Start Vite dev server:
+# Start the dev server:
 pnpm dev     # or npm run dev
 ```
 
-
-* **App URL:** `http://localhost:5173`
+* **React + Vite:** `http://localhost:5173`. Settings in `client/.env` (`VITE_API_BASE_URL`, ...).
+* **Next.js:** `http://localhost:3000`. Settings in `client/.env` (`NEXT_PUBLIC_API_BASE_URL`, ...). `NEXT_PUBLIC_*` values are inlined into the browser bundle, so they never hold secrets. Pages that need a signed-in user render in the browser and call the .NET API directly; there are no Next.js API routes or server actions, and the API's development CORS policy already allows port 3000.
+* **API URL and Docker:** the client's API base URL is called **from the browser**, so it must be a host-reachable address (`https://localhost:7001` by default), never a Compose service name.
 
 ### 4. Regenerate API Types After Changing the API
 
@@ -144,7 +149,7 @@ The script reads `http://localhost:5058/swagger/v1/swagger.json` (HTTP, because 
 
 Open the project root in VS Code and install the recommended extensions (C#, ESLint, Tailwind CSS, Docker).
 
-* **Run and Debug:** `Backend: API` (builds and debugs the API with the `https` profile, opens Swagger), `Backend: API (settings from .env)` (same, with `.env` variables such as a connection string override), `Frontend: Vite (Chrome)`, and the compound `Full stack: API + Vite`.
+* **Run and Debug:** `Backend: API` (builds and debugs the API with the `https` profile, opens Swagger), `Backend: API (settings from .env)` (same, with `.env` variables such as a connection string override), `Frontend: Vite (Chrome)` or `Frontend: Next.js (Chrome)`, and the compound `Full stack: API + Vite` or `Full stack: API + Next.js`, matching the selected frontend.
 * **Tasks:** `server: build`, `server: watch`, `client: dev`, `client: lint`, `db: up`, `db: stop`, `db: logs`. No task deletes containers or volumes.
 
 ---
@@ -153,7 +158,7 @@ Open the project root in VS Code and install the recommended extensions (C#, ESL
 
 ### Frontend
 
-* **Framework:** React 19 + TypeScript + Vite 8
+* **Framework:** React 19 + TypeScript, with Vite 8 (single-page app, React Router) or Next.js 16 (App Router)
 * **Styling:** Tailwind CSS v4 + Shadcn UI (accessible primitives with Radix UI)
 * **State & Server Cache:** Zustand 5 & TanStack Query v5
 * **Icons & Forms:** Lucide React, React Hook Form, Zod validation
@@ -184,7 +189,7 @@ Open the project root in VS Code and install the recommended extensions (C#, ESL
 
 | Tool | Minimum Version | Notes |
 | --- | --- | --- |
-| **Node.js** | `^22.13.0` or `>=23.5.0` | Required by the CLI and modern Vite / ESLint |
+| **Node.js** | `^22.13.0` or `>=23.5.0` | Required by the CLI; the generated client (Vite 8 or Next.js 16, with ESLint 10) needs `^20.19`, `^22.13` or `>=24` |
 | **.NET SDK** | `9.0+` | Required to build and run the backend Web API |
 | **Package Manager** | `pnpm 9+` or `npm 10+` | `pnpm` is recommended |
 | **Database** | SQL Server (LocalDB on Windows) or PostgreSQL | Docker (Compose v2) for the PostgreSQL container, or for SQL Server outside Windows/LocalDB |
@@ -227,14 +232,19 @@ src/
 ├── cli.ts            # Commander setup and step orchestrator
 ├── questions.ts      # Interactive prompt workflow
 ├── databases.ts      # Database providers: template edits, overlays & README sections
+├── frontends.ts      # Frontends: overlays & README sections
+├── doc-blocks.ts     # Renders the marked README sections
 ├── generate.ts       # Template copier, identifier renamer & secret injector
 ├── replacements.ts   # C# namespace & React identifier transformation logic
 └── steps.ts          # Safe subprocess runners (pnpm install, git init)
-templates/default/    # Sanitized template snapshot (SQL Server) distributed via npm
+templates/default/    # Sanitized template snapshot (SQL Server, React + Vite) distributed via npm
+templates/frontends/  # Frontend overlays: nextjs/client (replaces client/) and its .vscode/ (stored as _vscode)
 templates/databases/  # Per-provider overlays: compose.yaml, .env.example, generated .env (stored as _env), PostgreSQL migrations
 templates/common/     # Added to every project: .vscode/ (stored as _vscode) and the root .gitignore
 scripts/              # Template sync, migration generation & package audit scripts
 ```
+
+A project is the template plus, in order, `templates/common`, the frontend overlay (Next.js only) and the database overlay; a later overlay replaces files with the same path. The backend therefore comes from one place for every frontend.
 
 
 ### Updating the Template Snapshot
@@ -246,7 +256,9 @@ npm run sync-template -- --source ../react-dotnet-boilerplate --ref <git-tag-or-
 npm run check
 ```
 
-Only committed files at the given ref are copied, and secrets are replaced with per-project tokens. In PowerShell, quote the separator: `npm run sync-template '--' --source ...`.
+Only committed files at the given ref are copied, and secrets are replaced with per-project tokens. The source's `client-next/` becomes `templates/frontends/nextjs/client/`; everything else (except excluded files) becomes `templates/default/`. `templates/default.source.json` records the source commit. In PowerShell, quote the separator: `npm run sync-template '--' --source ...`.
+
+To try unreleased boilerplate changes, `--worktree` (instead of `--ref`) also reads uncommitted and untracked files that are not git-ignored. It is recorded as `"worktree": true` in `templates/default.source.json`, and the package audit (`scripts/audit-package.ts`) fails until the template is synced from a commit again.
 
 ### Maintaining Database Migrations
 

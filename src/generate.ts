@@ -8,10 +8,12 @@ import {
   type Database,
   type ProviderEdit,
 } from './databases.js';
+import type { DocBlock } from './doc-blocks.js';
 import { CancelledError, CliError } from './errors.js';
+import { DEFAULT_FRONTEND, FRONTENDS, frontendDocBlocks, type Frontend } from './frontends.js';
 import { toPascalCase, validateDisplayName, validateProjectName } from './naming.js';
 import type { PackageManager } from './package-managers.js';
-import { defaultCommonDir, defaultDatabasesDir } from './paths.js';
+import { defaultCommonDir, defaultDatabasesDir, defaultFrontendsDir } from './paths.js';
 import { applyReplacements, buildReplacements, type Replacement } from './replacements.js';
 import { generateSecrets, type ProjectSecrets } from './secrets.js';
 import { isBinary } from './text.js';
@@ -24,7 +26,7 @@ const ENV_FILE = 'client/.env';
 const NEVER_COPIED = new Set(['.git']);
 
 export interface PlannedFile {
-  /** Directory the file is read from: the template, or a database overlay. */
+  /** Directory the file is read from: the template, or an overlay. */
   sourceDir: string;
   templatePath: string;
   destinationPath: string;
@@ -37,6 +39,8 @@ export interface PlanOptions {
   database?: Database;
   databasesDir?: string;
   commonDir?: string;
+  frontend?: Frontend;
+  frontendsDir?: string;
 }
 
 export type DestinationState = 'missing' | 'empty' | 'non-empty';
@@ -59,6 +63,10 @@ export interface GenerateOptions {
   databasesDir?: string;
   /** Files added for every database; defaults to the packaged `templates/common`. */
   commonDir?: string;
+  /** Defaults to the template's own client (React + Vite). */
+  frontend?: Frontend;
+  /** Where frontend overlays live; defaults to the packaged `templates/frontends`. */
+  frontendsDir?: string;
   /** Explicit consent to add files to a non-empty directory. Existing files are never overwritten. */
   allowNonEmpty?: boolean;
   /** Aborting stops generation and removes everything this run wrote. */
@@ -86,6 +94,7 @@ export async function generateProject(options: GenerateOptions): Promise<Generat
 
   const pascalName = toPascalCase(options.projectName);
   const database = options.database ?? DEFAULT_DATABASE;
+  const frontend = options.frontend ?? DEFAULT_FRONTEND;
   const plan = await planProject({
     templateDir: options.templateDir,
     pascalName,
@@ -93,6 +102,8 @@ export async function generateProject(options: GenerateOptions): Promise<Generat
     database,
     databasesDir: options.databasesDir,
     commonDir: options.commonDir,
+    frontend,
+    frontendsDir: options.frontendsDir,
   });
   await verifyProviderEdits(options.templateDir, database);
   const destination = await inspectDestination(options.targetDir, plan);
@@ -115,7 +126,7 @@ export async function generateProject(options: GenerateOptions): Promise<Generat
   const rendering: RenderContext = {
     replacements,
     edits: DATABASES[database].edits,
-    docBlocks: databaseDocBlocks(database),
+    docBlocks: { ...frontendDocBlocks(frontend), ...databaseDocBlocks(database, frontend) },
   };
 
   const writtenFiles: string[] = [];
@@ -147,33 +158,43 @@ export async function generateProject(options: GenerateOptions): Promise<Generat
 export async function planProject(options: PlanOptions): Promise<PlannedFile[]> {
   const { templateDir, pascalName, packageManager } = options;
   const info = DATABASES[options.database ?? DEFAULT_DATABASE];
+  const frontend = FRONTENDS[options.frontend ?? DEFAULT_FRONTEND];
   const templateFiles = await listTemplateFiles(templateDir);
   const plannedFile = (sourceDir: string, templatePath: string): PlannedFile => ({
     sourceDir,
     templatePath,
     destinationPath: toDestinationPath(templatePath, pascalName),
   });
+  const replacedPrefixes = [frontend.replacesPrefix, info.replacesPrefix].filter((prefix) => prefix !== undefined);
 
-  const plan = templateFiles
-    .filter((templatePath) => !(packageManager === 'npm' && templatePath === PNPM_LOCKFILE))
-    .filter((templatePath) => !(info.replacesPrefix && templatePath.startsWith(info.replacesPrefix)))
+  let plan = templateFiles
+    .filter((templatePath) => !replacedPrefixes.some((prefix) => templatePath.startsWith(prefix)))
     .map((templatePath) => plannedFile(templateDir, templatePath));
 
+  // Later overlays win: the database overlay is the most specific.
   const overlays = [
     { dir: options.commonDir ?? defaultCommonDir, label: 'shared project' },
+    ...(frontend.overlay
+      ? [{ dir: path.join(options.frontendsDir ?? defaultFrontendsDir, frontend.overlay), label: frontend.name }]
+      : []),
     { dir: path.join(options.databasesDir ?? defaultDatabasesDir, info.overlay), label: info.name },
   ];
   for (const overlay of overlays) {
     const overlayFiles = await listOverlayFiles(overlay.dir, overlay.label);
     const overlaid = new Set(overlayFiles);
-    const kept = plan.filter((file) => !overlaid.has(file.templatePath));
-    plan.length = 0;
-    plan.push(...kept, ...overlayFiles.map((templatePath) => plannedFile(overlay.dir, templatePath)));
+    plan = [
+      ...plan.filter((file) => !overlaid.has(file.templatePath)),
+      ...overlayFiles.map((templatePath) => plannedFile(overlay.dir, templatePath)),
+    ];
   }
 
-  // The client works without .env (env.ts has fallbacks), but starting from the example keeps the settings visible.
-  if (templateFiles.includes(ENV_EXAMPLE)) {
-    plan.push({ sourceDir: templateDir, templatePath: ENV_EXAMPLE, destinationPath: ENV_FILE });
+  // The lockfile can come from the template or a frontend overlay; npm projects get npm's own lockfile on install.
+  plan = plan.filter((file) => !(packageManager === 'npm' && file.templatePath === PNPM_LOCKFILE));
+
+  // The client works without .env (its env config has fallbacks), but starting from the example keeps the settings visible.
+  const envExample = plan.find((file) => file.templatePath === ENV_EXAMPLE);
+  if (envExample) {
+    plan.push({ sourceDir: envExample.sourceDir, templatePath: ENV_EXAMPLE, destinationPath: ENV_FILE });
   }
   return plan;
 }
@@ -252,7 +273,7 @@ export function toDestinationPath(templatePath: string, pascalName: string): str
 interface RenderContext {
   replacements: Replacement[];
   edits: ProviderEdit[];
-  docBlocks: Record<string, string>;
+  docBlocks: Record<string, DocBlock>;
 }
 
 async function renderFile(file: PlannedFile, context: RenderContext): Promise<Buffer | string> {

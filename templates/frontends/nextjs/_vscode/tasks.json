@@ -1,0 +1,79 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "server: build",
+      "type": "process",
+      "command": "dotnet",
+      "args": [
+        "build",
+        "${workspaceFolder}/server/ReactDotnetBoilerplate.sln",
+        "-property:GenerateFullPaths=true",
+        "-consoleLoggerParameters:NoSummary"
+      ],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "server: watch",
+      "type": "process",
+      "command": "dotnet",
+      "args": [
+        "watch",
+        "run",
+        "--project",
+        "${workspaceFolder}/server/ReactDotnetBoilerplate.Api",
+        "--launch-profile",
+        "https"
+      ],
+      "isBackground": true,
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "client: dev",
+      "type": "npm",
+      "script": "dev",
+      "path": "client",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "nextjs",
+        "pattern": { "regexp": "^(__nextjs_has_no_problem_lines__)$", "file": 1, "message": 1 },
+        "background": { "activeBegins": true, "beginsPattern": "Next\\.js", "endsPattern": "Ready in" }
+      }
+    },
+    {
+      "label": "client: lint",
+      "type": "npm",
+      "script": "lint",
+      "path": "client",
+      "problemMatcher": "$eslint-stylish"
+    },
+    {
+      "label": "db: up",
+      "detail": "Start the database container from compose.yaml and wait until it is healthy",
+      "type": "process",
+      "command": "docker",
+      "args": ["compose", "up", "-d", "--wait"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "db: stop",
+      "detail": "Stop the database container; data is kept",
+      "type": "process",
+      "command": "docker",
+      "args": ["compose", "stop"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "db: logs",
+      "type": "process",
+      "command": "docker",
+      "args": ["compose", "logs", "--follow", "--tail", "100"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "isBackground": true,
+      "problemMatcher": []
+    }
+  ]
+}

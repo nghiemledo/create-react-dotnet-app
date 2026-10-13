@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { CommanderError } from 'commander';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { main, type Runtime } from '../src/cli.js';
+import { createProgram, main, type Runtime } from '../src/cli.js';
 import { CancelledError, CliError } from '../src/errors.js';
 import { defaultTemplateDir, packageRoot } from '../src/paths.js';
 import { INITIAL_COMMIT_MESSAGE } from '../src/steps.js';
@@ -60,15 +60,16 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
       ]);
     });
 
-    it('asks for the project name, database, package manager, install and git when no name is given', async () => {
+    it('asks for the project name, frontend, database, package manager, install and git when no name is given', async () => {
       const target = await newTarget('prompted-app');
-      const prompter = scriptedPrompter([target, 'sqlserver', 'npm', false, false]);
+      const prompter = scriptedPrompter([target, 'vite', 'sqlserver', 'npm', false, false]);
       const run = fakeRunner();
 
       const summary = await main(argv(), runtime({ interactive: true, prompter, run }));
 
       expect(prompter.asked.map((q) => [q.kind, q.message])).toEqual([
         ['text', 'Project name:'],
+        ['select', 'Frontend:'],
         ['select', 'Database:'],
         ['select', 'Frontend package manager:'],
         ['confirm', 'Install frontend dependencies with npm now?'],
@@ -83,7 +84,7 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
 
     it('re-asks when the typed name is invalid', async () => {
       const dir = await makeTempDir();
-      const prompter = scriptedPrompter([path.join(dir, 'Bad Name'), path.join(dir, 'good-name'), 'sqlserver', 'pnpm', false, false]);
+      const prompter = scriptedPrompter([path.join(dir, 'Bad Name'), path.join(dir, 'good-name'), 'vite', 'sqlserver', 'pnpm', false, false]);
 
       const summary = await main(argv(), runtime({ interactive: true, prompter }));
 
@@ -99,7 +100,7 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
 
     it('re-prompts after an invalid name argument in interactive mode', async () => {
       const dir = await makeTempDir();
-      const prompter = scriptedPrompter([path.join(dir, 'fixed-name'), 'sqlserver', 'pnpm', false, false]);
+      const prompter = scriptedPrompter([path.join(dir, 'fixed-name'), 'vite', 'sqlserver', 'pnpm', false, false]);
 
       const summary = await main(argv(path.join(dir, 'con')), runtime({ interactive: true, prompter }));
 
@@ -115,28 +116,28 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
   describe('package managers', () => {
     it('only offers installed package managers', async () => {
       const target = await newTarget();
-      const prompter = scriptedPrompter(['sqlserver', false, false]);
+      const prompter = scriptedPrompter(['vite', 'sqlserver', false, false]);
 
       const summary = await main(argv(target), runtime({ interactive: true, prompter, tools: { pnpm: false } }));
 
       expect(prompter.asked.some((q) => q.message === 'Frontend package manager:')).toBe(false);
-      expect(prompter.asked[1]?.message).toBe('Install frontend dependencies with npm now?');
+      expect(prompter.asked[2]?.message).toBe('Install frontend dependencies with npm now?');
       expect(existsSync(path.join(summary.targetDir, 'client', 'pnpm-lock.yaml'))).toBe(false);
     });
 
     it('offers pnpm and npm when both are installed', async () => {
       const target = await newTarget();
-      const prompter = scriptedPrompter(['sqlserver', 'pnpm', false, false]);
+      const prompter = scriptedPrompter(['vite', 'sqlserver', 'pnpm', false, false]);
 
       await main(argv(target), runtime({ interactive: true, prompter }));
 
-      expect(prompter.asked[1]).toMatchObject({
+      expect(prompter.asked[2]).toMatchObject({
         kind: 'select',
         choices: ['pnpm', 'npm'],
         labels: ['pnpm', 'npm'],
         badges: ['exact versions from the template lockfile', 'resolves versions from package.json'],
       });
-      expect(prompter.asked[1]!.descriptions![0]).toContain('--frozen-lockfile');
+      expect(prompter.asked[2]!.descriptions![0]).toContain('--frozen-lockfile');
     });
 
     it('rejects unsupported package managers', async () => {
@@ -162,6 +163,129 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
     });
   });
 
+  describe('frontend', () => {
+    const printed = () =>
+      vi
+        .mocked(console.log)
+        .mock.calls.map((args) => String(args[0]))
+        .join('\n');
+    const warned = () =>
+      vi
+        .mocked(console.warn)
+        .mock.calls.map((args) => String(args[0]))
+        .join('\n');
+
+    it('offers React + Vite (default) and Next.js right after the project name', async () => {
+      const target = await newTarget();
+      const prompter = scriptedPrompter([target, 'nextjs', 'sqlserver', 'pnpm', false, false]);
+
+      const summary = await main(argv(), runtime({ interactive: true, prompter }));
+
+      expect(prompter.asked[1]).toMatchObject({
+        kind: 'select',
+        message: 'Frontend:',
+        choices: ['vite', 'nextjs'],
+        labels: ['React + Vite', 'Next.js'],
+        badges: ['Default', 'App Router'],
+        default: 'vite',
+      });
+      expect(prompter.asked[1]!.descriptions![1]).toContain('same .NET API');
+      expect(summary.frontend).toBe('nextjs');
+      expect(existsSync(path.join(target, 'client', 'next.config.ts'))).toBe(true);
+      expect(existsSync(path.join(target, 'client', 'vite.config.ts'))).toBe(false);
+      expect(printed()).toContain('(Next.js, SQL Server)');
+      expect(printed()).toContain('Next.js dev server at http://localhost:3000');
+      expect(printed()).toContain('"Full stack: API + Next.js"');
+    });
+
+    it('keeps React + Vite when not prompting and no frontend is given, as in 0.2.x', async () => {
+      const target = await newTarget();
+      const summary = await main(argv(target, '--yes', '--no-install', '--no-git'), runtime());
+
+      expect(summary.frontend).toBe('vite');
+      expect(existsSync(path.join(target, 'client', 'vite.config.ts'))).toBe(true);
+      expect(existsSync(path.join(target, 'client', 'next.config.ts'))).toBe(false);
+      expect(printed()).toContain('Vite dev server at http://localhost:5173');
+      expect(printed()).toContain('"Full stack: API + Vite"');
+    });
+
+    it('does not ask when --frontend is given', async () => {
+      const target = await newTarget();
+      const prompter = scriptedPrompter(['postgresql', 'pnpm', false, false]);
+
+      const summary = await main(argv(target, '--frontend', 'nextjs'), runtime({ interactive: true, prompter }));
+
+      expect(prompter.asked.map((q) => q.message)).not.toContain('Frontend:');
+      expect(prompter.asked[0]?.message).toBe('Database:');
+      expect(summary.frontend).toBe('nextjs');
+    });
+
+    it('rejects unsupported frontends before writing anything, naming the allowed values', async () => {
+      const target = await newTarget();
+      const error = await main(argv(target, '--frontend', 'angular'), runtime()).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(CommanderError);
+      expect((error as CommanderError).message).toContain("argument 'angular' is invalid. Allowed choices are vite, nextjs.");
+      expect(existsSync(target)).toBe(false);
+    });
+
+    it('documents --frontend and its choices in the help output', () => {
+      const help = createProgram().helpInformation();
+      expect(help).toContain('--frontend <framework>');
+      expect(help).toContain('frontend framework (default when not prompting: vite)');
+      expect(help).toContain('(choices: "vite", "nextjs")');
+      expect(help).toContain('React (Vite or Next.js) + ASP.NET Core');
+    });
+
+    it.each(['sqlserver', 'postgresql'])('generates Next.js with %s non-interactively, sharing the backend', async (database) => {
+      const target = await newTarget();
+      const run = fakeRunner();
+
+      const summary = await main(argv(target, '--frontend', 'nextjs', '--db', database, '--yes'), runtime({ run }));
+
+      expect(summary).toMatchObject({ frontend: 'nextjs', database });
+      expect(existsSync(path.join(target, 'server', 'MyApp.sln'))).toBe(true);
+      expect(existsSync(path.join(target, 'compose.yaml'))).toBe(true);
+      expect(existsSync(path.join(target, '.env'))).toBe(true);
+      expect(await fs.readFile(path.join(target, 'client', '.env'), 'utf8')).toContain('NEXT_PUBLIC_API_BASE_URL=');
+      expect(existsSync(path.join(target, 'client', 'pnpm-lock.yaml'))).toBe(true);
+      expect(run.calls.map(({ command, args, options }) => [command, args, options.cwd])).toEqual([
+        ['pnpm', ['install', '--frozen-lockfile'], path.join(target, 'client')],
+        ['git', ['init'], target],
+        ['git', ['add', '-A'], target],
+        ['git', ['commit', '-m', INITIAL_COMMIT_MESSAGE], target],
+      ]);
+    });
+
+    it('names the selected frontend when Node.js is too old for the generated client', async () => {
+      await main(argv(await newTarget(), '--frontend', 'nextjs', '--no-install', '--no-git'), runtime({ nodeVersion: 'v22.12.0' }));
+      expect(warned()).toContain('Node v22.12.0 is below what the generated client needs');
+      expect(warned()).toContain('Next.js 16 and ESLint 10');
+    });
+
+    it('checks an existing directory against the files of every frontend before asking which one', async () => {
+      const target = await newTarget();
+      await writeFiles(target, { 'client/next.config.ts': 'export default {};' });
+      const prompter = scriptedPrompter(['cancel']);
+
+      await expect(main(argv(target), runtime({ interactive: true, prompter }))).rejects.toThrow(CancelledError);
+
+      expect(prompter.asked[0]?.choices).toEqual(['rename', 'cancel']);
+      expect(await listFiles(target)).toEqual(['client/next.config.ts']);
+    });
+
+    it('keeps a Next.js project and explains how to recover when installation fails', async () => {
+      const target = await newTarget();
+      const run = fakeRunner((call) => (call.command === 'npm' ? { exitCode: 1 } : {}));
+
+      const summary = await main(argv(target, '--frontend', 'nextjs', '--pm', 'npm', '--no-git'), runtime({ run }));
+
+      expect(summary.steps[1]).toMatchObject({ status: 'failed' });
+      expect(summary.steps[1]?.recovery).toMatch(/npm install$/);
+      expect(existsSync(path.join(target, 'client', 'package.json'))).toBe(true);
+      expect(existsSync(path.join(target, 'client', 'pnpm-lock.yaml'))).toBe(false);
+    });
+  });
+
   describe('database', () => {
     const infrastructureProject = (target: string) =>
       fs.readFile(path.join(target, 'server/MyApp.Infrastructure/MyApp.Infrastructure.csproj'), 'utf8');
@@ -171,13 +295,13 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
         .mock.calls.map((args) => String(args[0]))
         .join('\n');
 
-    it('offers SQL Server (default) and PostgreSQL right after the project name', async () => {
+    it('offers SQL Server (default) and PostgreSQL right after the frontend', async () => {
       const target = await newTarget();
-      const prompter = scriptedPrompter([target, 'postgresql', 'pnpm', false, false]);
+      const prompter = scriptedPrompter([target, 'vite', 'postgresql', 'pnpm', false, false]);
 
       const summary = await main(argv(), runtime({ interactive: true, prompter }));
 
-      expect(prompter.asked[1]).toMatchObject({
+      expect(prompter.asked[2]).toMatchObject({
         kind: 'select',
         message: 'Database:',
         choices: ['sqlserver', 'postgresql'],
@@ -185,7 +309,7 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
         badges: ['Default · LocalDB on Windows', 'Recommended for macOS / Linux'],
         default: 'sqlserver',
       });
-      const [sqlServerHelp, postgresHelp] = prompter.asked[1]!.descriptions!;
+      const [sqlServerHelp, postgresHelp] = prompter.asked[2]!.descriptions!;
       expect(sqlServerHelp).toContain('SqlClient');
       expect(sqlServerHelp).toContain('SqlConnection');
       expect(postgresHelp).toContain('Npgsql provider');
@@ -208,7 +332,7 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
 
     it('does not ask when --db is given', async () => {
       const target = await newTarget();
-      const prompter = scriptedPrompter(['pnpm', false, false]);
+      const prompter = scriptedPrompter(['vite', 'pnpm', false, false]);
 
       const summary = await main(argv(target, '--db', 'postgresql'), runtime({ interactive: true, prompter }));
 
@@ -251,7 +375,7 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
       const dir = await makeTempDir();
       const existing = path.join(dir, 'taken');
       await writeFiles(existing, { 'notes.txt': 'keep me' });
-      const prompter = scriptedPrompter(['rename', path.join(dir, 'fresh'), 'sqlserver', 'pnpm', false, false]);
+      const prompter = scriptedPrompter(['rename', path.join(dir, 'fresh'), 'vite', 'sqlserver', 'pnpm', false, false]);
 
       const summary = await main(argv(existing), runtime({ interactive: true, prompter }));
 
@@ -262,7 +386,7 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
     it('adds the project to a non-empty directory only after explicit confirmation, keeping existing files', async () => {
       const target = await newTarget();
       await writeFiles(target, { 'notes.txt': 'keep me', 'client/design.md': 'mine' });
-      const prompter = scriptedPrompter(['merge', 'sqlserver', 'pnpm', false, false]);
+      const prompter = scriptedPrompter(['merge', 'vite', 'sqlserver', 'pnpm', false, false]);
 
       await main(argv(target), runtime({ interactive: true, prompter }));
 
@@ -294,10 +418,11 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
   describe('cancellation', () => {
     it.each<[string, ScriptedAnswer[]]>([
       ['project name', [CANCEL]],
-      ['database', ['__TARGET__', CANCEL]],
-      ['package manager', ['__TARGET__', 'postgresql', CANCEL]],
-      ['install question', ['__TARGET__', 'sqlserver', 'pnpm', CANCEL]],
-      ['git question', ['__TARGET__', 'postgresql', 'pnpm', true, CANCEL]],
+      ['frontend', ['__TARGET__', CANCEL]],
+      ['database', ['__TARGET__', 'nextjs', CANCEL]],
+      ['package manager', ['__TARGET__', 'vite', 'postgresql', CANCEL]],
+      ['install question', ['__TARGET__', 'nextjs', 'sqlserver', 'pnpm', CANCEL]],
+      ['git question', ['__TARGET__', 'nextjs', 'postgresql', 'pnpm', true, CANCEL]],
     ])('cancelling at the %s prompt writes nothing and runs nothing', async (_label, script) => {
       const target = await newTarget();
       const run = fakeRunner();
@@ -319,7 +444,7 @@ describe.skipIf(!existsSync(defaultTemplateDir))('create-react-dotnet-app CLI', 
       .version;
 
     it('shows the welcome banner with the version before the first question in interactive mode', async () => {
-      const prompter = scriptedPrompter([await newTarget(), 'postgresql', 'pnpm', false, false]);
+      const prompter = scriptedPrompter([await newTarget(), 'vite', 'postgresql', 'pnpm', false, false]);
       await main(argv(), runtime({ interactive: true, prompter }));
 
       const lines = printed().split('\n');

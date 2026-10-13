@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { defaultTemplateDir, packageRoot } from '../src/paths.js';
+import { defaultFrontendsDir, defaultTemplateDir, packageRoot } from '../src/paths.js';
 import { listFiles } from './helpers.js';
 
 const CREDENTIAL_PATTERNS: [string, RegExp][] = [
@@ -27,6 +27,7 @@ describe('no embedded credentials', () => {
   it.each([
     ['src', path.join(packageRoot, 'src')],
     ['template', defaultTemplateDir],
+    ['frontend overlays', defaultFrontendsDir],
   ])('%s contains no tokens or private keys', async (_label, root) => {
     if (!existsSync(root)) return;
     for (const [file, text] of await textFiles(root)) {

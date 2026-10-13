@@ -1,6 +1,6 @@
 # 🎓 Training Management System (Full-Stack Architecture Boilerplate)
 
-> Dự án mẫu kiến trúc chuẩn doanh nghiệp kết hợp giữa **Backend (.NET 9 Web API - Clean Architecture)** và **Frontend (React 19 + TypeScript + Vite + TanStack Query + TailwindCSS)**.
+> Dự án mẫu kiến trúc chuẩn doanh nghiệp kết hợp giữa **Backend (.NET 9 Web API - Clean Architecture)** và **Frontend (<!-- crda:frontend-summary -->React 19 + TypeScript + Vite<!-- /crda:frontend-summary --> + TanStack Query + TailwindCSS)**.
 
 ---
 
@@ -8,6 +8,7 @@
 
 ### Frontend (Client)
 
+<!-- crda:frontend-stack -->
 > React
 > TypeScript
 > Vite
@@ -16,6 +17,7 @@
 > Zustand
 > React Hook Form
 > Zod
+<!-- /crda:frontend-stack -->
 
 ### Backend (Server)
 
@@ -35,6 +37,7 @@ Swagger
 
 ## 📂 Cấu Trúc Tổng Quan Dự Án
 
+<!-- crda:frontend-tree -->
 ```text
 demo-software-architecture/
 ├── client/                     # Mã nguồn Frontend (React + Vite + TypeScript)
@@ -53,6 +56,7 @@ demo-software-architecture/
 ├── CRUD_FLOW_GUIDE.md          # 📘 Sách hướng dẫn luồng CRUD từ A -> Z cho Dev
 └── README.md                   # 📄 Tài liệu tổng quan này
 ```
+<!-- /crda:frontend-tree -->
 
 ---
 
@@ -120,6 +124,7 @@ In the Development environment the API applies pending migrations and seeds samp
 
 
 
+<!-- crda:frontend-quickstart -->
 ### 3. Chạy Frontend (Client)
 
 1. Mở một terminal mới và di chuyển vào thư mục client:
@@ -147,6 +152,7 @@ In the Development environment the API applies pending migrations and seeds samp
    npm run dev
   ```
 6. Mở trình duyệt tại: [http://localhost:5173](http://localhost:5173) (hoặc port hiển thị trên terminal).
+<!-- /crda:frontend-quickstart -->
 
 ---
 

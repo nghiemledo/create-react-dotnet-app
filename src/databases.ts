@@ -1,4 +1,7 @@
+import { DEFAULT_FRONTEND, FRONTENDS, type Frontend } from './frontends.js';
 import { SOURCE_PROJECT_NAME, TEMPLATE_TOKENS } from './tokens.js';
+
+export { renderDocBlocks } from './doc-blocks.js';
 
 export const SUPPORTED_DATABASES = ['sqlserver', 'postgresql'] as const;
 
@@ -112,11 +115,12 @@ const SERVER_PROJECTS = `--project ${SOURCE_PROJECT_NAME}.Infrastructure --start
  * Renderers for `<!-- crda:<name> -->...<!-- /crda:<name> -->` blocks in the template's Markdown files.
  * Output uses the source identifiers; the regular identifier rename runs afterwards.
  */
-export function databaseDocBlocks(database: Database): Record<string, string> {
+export function databaseDocBlocks(database: Database, frontend: Frontend = DEFAULT_FRONTEND): Record<string, string> {
   const info = DATABASES[database];
+  const vscode = vscodeSection(frontend);
   return {
     'database-name': info.name,
-    'database-setup': database === 'postgresql' ? postgresSetup() : sqlServerSetup(),
+    'database-setup': database === 'postgresql' ? postgresSetup(vscode) : sqlServerSetup(vscode),
     'database-guide': databaseGuide(info),
   };
 }
@@ -132,7 +136,7 @@ docker compose down           # remove the container; the data volume is kept
 Data lives in a named Docker volume, so stopping, restarting or recreating the container keeps it.
 \`docker compose down -v\` deletes the volume and every row in it; use it only to start from scratch.`;
 
-function sqlServerSetup(): string {
+function sqlServerSetup(vscode: string): string {
   return `### Database: SQL Server
 
 The API uses Entity Framework Core (and Dapper) with SQL Server. The connection string is
@@ -182,10 +186,10 @@ ${connectionHostSection('sqlserver')}
 
 ${credentialsSection('sqlserver')}
 
-${VSCODE_SECTION}`;
+${vscode}`;
 }
 
-function postgresSetup(): string {
+function postgresSetup(vscode: string): string {
   return `### Database: PostgreSQL
 
 The API uses Entity Framework Core (and Dapper) with PostgreSQL. A local PostgreSQL 17 container is defined in
@@ -227,7 +231,7 @@ ${connectionHostSection('postgresql')}
 
 ${credentialsSection('postgresql')}
 
-${VSCODE_SECTION}`;
+${vscode}`;
 }
 
 /**
@@ -286,19 +290,23 @@ least 64 characters for both), \`EmailSettings__SmtpUser\`, \`EmailSettings__Smt
 \`Authentication__Google__ClientId\`.`;
 }
 
-const VSCODE_SECTION = `### Running in VS Code
+function vscodeSection(frontend: Frontend): string {
+  const { tool, devServerUrl, vscode } = FRONTENDS[frontend];
+  const port = new URL(devServerUrl).port;
+  return `### Running in VS Code
 
 Open the project root folder and install the recommended extensions when prompted (\`.vscode/extensions.json\`).
 
 - **Run and Debug**: \`Backend: API\` builds and debugs the API with the \`https\` launch profile and opens
   Swagger; \`Backend: API (settings from .env)\` does the same with the variables from \`.env\` (for connection
-  string overrides); \`Frontend: Vite (Chrome)\` starts the Vite dev server and debugs the client in Chrome;
-  \`Full stack: API + Vite\` runs both.
+  string overrides); \`${vscode.launch}\` starts the ${tool} dev server and debugs the client in Chrome;
+  \`${vscode.compound}\` runs both.
 - **Tasks** (Terminal > Run Task): \`server: build\`, \`server: watch\`, \`client: dev\`, \`client: lint\`, and
   \`db: up\` / \`db: stop\` / \`db: logs\` for the Docker database. None of them delete data.
 - Install the client dependencies first (\`npm install\` or \`pnpm install\` in \`client/\`). The frontend
-  configuration expects Vite on its default port 5173; if Vite picks another port, update \`url\` in
+  configuration expects ${tool} on its default port ${port}; if ${tool} picks another port, update \`url\` in
   \`.vscode/launch.json\`.`;
+}
 
 function databaseGuide(info: DatabaseInfo): string {
   return `## 🗄️ Database & Migrations (${info.name})
@@ -335,17 +343,4 @@ function dapperNote(info: DatabaseInfo): string {
   }
   return `\`IDapperBase\` executes stored procedures by name. No stored procedures are
   included; create your own (for example with \`migrationBuilder.Sql\`) in T-SQL.`;
-}
-
-const BLOCK_PATTERN = /<!-- crda:([a-z-]+) -->[\s\S]*?<!-- \/crda:\1 -->/g;
-
-/** Replaces every marked block with its rendering, markers included. Unknown block names are template bugs. */
-export function renderDocBlocks(text: string, blocks: Record<string, string>, templatePath: string): string {
-  return text.replace(BLOCK_PATTERN, (_match, name: string) => {
-    const rendered = blocks[name];
-    if (rendered === undefined) {
-      throw new Error(`Unknown documentation block "${name}" in ${templatePath}.`);
-    }
-    return rendered;
-  });
 }

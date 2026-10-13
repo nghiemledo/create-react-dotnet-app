@@ -15,8 +15,13 @@ export const SOURCE_PATHS = {
  */
 const EXCLUDED_PATHS: RegExp[] = [
   /^\.github\//,
+  // Maintenance scripts of the source repository itself (for example the client/client-next consistency check).
+  /^scripts\//,
   /(^|\/)node_modules\//,
-  /(^|\/)(bin|obj|dist|\.vs)\//,
+  /(^|\/)(bin|obj|dist|\.vs|\.next)\//,
+  /^client-next\/out\//,
+  /(^|\/)next-env\.d\.ts$/,
+  /\.tsbuildinfo$/,
   /\.csproj\.user$/,
   /(^|\/)\.env$/,
   /(^|\/)\.env\.(?!example$)[^/]+$/,
@@ -127,8 +132,42 @@ export function templatePathFor(sourcePath: string): string {
     .join('/');
 }
 
+/**
+ * Source directories that hold an alternative client, by frontend overlay (`templates/frontends/<overlay>/`).
+ * Each becomes `client/` in its overlay, so generated projects always have their frontend in `client/`.
+ */
+export const FRONTEND_SOURCE_DIRS: Record<string, string> = {
+  nextjs: 'client-next/',
+};
+
+export interface TemplateTarget {
+  /** Frontend overlay the file belongs to; `undefined` for templates/default. */
+  frontendOverlay?: string;
+  templatePath: string;
+}
+
+export function templateTargetFor(sourcePath: string): TemplateTarget {
+  for (const [frontendOverlay, sourceDir] of Object.entries(FRONTEND_SOURCE_DIRS)) {
+    if (sourcePath.startsWith(sourceDir)) {
+      return { frontendOverlay, templatePath: templatePathFor(`client/${sourcePath.slice(sourceDir.length)}`) };
+    }
+  }
+  return { templatePath: templatePathFor(sourcePath) };
+}
+
+/** Package-relative path of a source file in the packed template. */
+export function packagedPathFor(sourcePath: string): string {
+  const target = templateTargetFor(sourcePath);
+  return target.frontendOverlay
+    ? `templates/frontends/${target.frontendOverlay}/${target.templatePath}`
+    : `templates/default/${target.templatePath}`;
+}
+
 export interface SanitizeResult {
+  /** templates/default */
   files: Map<string, Buffer>;
+  /** The synced part (`client/`) of each frontend overlay, keyed by overlay name. */
+  frontendFiles: Map<string, Map<string, Buffer>>;
   excluded: string[];
   applied: string[];
 }
@@ -155,8 +194,18 @@ export function sanitizeSourceFiles(sourceFiles: Map<string, Buffer>): SanitizeR
   ]);
 
   const files = new Map<string, Buffer>();
+  const frontendFiles = new Map<string, Map<string, Buffer>>();
   const excluded: string[] = [];
   const applied: string[] = [];
+  const output = (sourcePath: string, content: Buffer) => {
+    const target = templateTargetFor(sourcePath);
+    let destination = files;
+    if (target.frontendOverlay) {
+      destination = frontendFiles.get(target.frontendOverlay) ?? new Map<string, Buffer>();
+      frontendFiles.set(target.frontendOverlay, destination);
+    }
+    destination.set(target.templatePath, content);
+  };
 
   for (const [sourcePath, content] of sourceFiles) {
     if (isExcluded(sourcePath)) {
@@ -164,7 +213,7 @@ export function sanitizeSourceFiles(sourceFiles: Map<string, Buffer>): SanitizeR
       continue;
     }
     if (isBinary(content)) {
-      files.set(templatePathFor(sourcePath), content);
+      output(sourcePath, content);
       continue;
     }
 
@@ -184,10 +233,15 @@ export function sanitizeSourceFiles(sourceFiles: Map<string, Buffer>): SanitizeR
       }
       text = redacted;
     }
-    files.set(templatePathFor(sourcePath), Buffer.from(text, 'utf8'));
+    output(sourcePath, Buffer.from(text, 'utf8'));
   }
 
-  const leaks = findLeakedSecrets(files, secrets);
+  const leaks = [
+    ...findLeakedSecrets(files, secrets),
+    ...[...frontendFiles].flatMap(([overlay, overlayFiles]) =>
+      findLeakedSecrets(overlayFiles, secrets).map((templatePath) => `frontends/${overlay}/${templatePath}`),
+    ),
+  ];
   if (leaks.length > 0) {
     throw new Error(
       `Secret values from the source repository remain in: ${leaks.join(', ')}. ` +
@@ -195,7 +249,7 @@ export function sanitizeSourceFiles(sourceFiles: Map<string, Buffer>): SanitizeR
     );
   }
 
-  return { files, excluded, applied };
+  return { files, frontendFiles, excluded, applied };
 }
 
 export function findLeakedSecrets(files: Map<string, Buffer>, secrets: DiscoveredSecrets): string[] {

@@ -16,7 +16,8 @@
     "dist",
     "templates/default",
     "templates/databases",
-    "templates/common"
+    "templates/common",
+    "templates/frontends"
   ],
   "engines": {
     "node": "^22.13.0 || >=23.5.0"

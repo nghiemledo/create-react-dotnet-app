@@ -41,7 +41,10 @@ export function isInsideGitRepository(probe: ToolProbe, targetDir: string): bool
   return probe('git', ['rev-parse', '--is-inside-work-tree'], dir) === 'true';
 }
 
-/** The template's Vite 8 and ESLint 10 require Node ^20.19 || ^22.13 || >=24. */
+/**
+ * Both clients use ESLint 10, which requires Node ^20.19 || ^22.13 || >=24. Vite 8 needs the same range and
+ * Next.js 16 needs >=20.9, so one range covers either frontend.
+ */
 export function nodeSatisfiesTemplate(version: string): boolean {
   const [major = 0, minor = 0] = version.replace(/^v/, '').split('.').map(Number);
   return (major === 20 && minor >= 19) || (major === 22 && minor >= 13) || major >= 24;

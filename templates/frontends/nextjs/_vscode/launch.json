@@ -1,0 +1,51 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Backend: API",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "server: build",
+      "program": "${workspaceFolder}/server/ReactDotnetBoilerplate.Api/bin/Debug/net9.0/ReactDotnetBoilerplate.Api.dll",
+      "cwd": "${workspaceFolder}/server/ReactDotnetBoilerplate.Api",
+      "launchSettingsProfile": "https",
+      "stopAtEntry": false,
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "\\bNow listening on:\\s+(https?://\\S+)",
+        "uriFormat": "%s/swagger"
+      }
+    },
+    {
+      "name": "Backend: API (settings from .env)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "server: build",
+      "program": "${workspaceFolder}/server/ReactDotnetBoilerplate.Api/bin/Debug/net9.0/ReactDotnetBoilerplate.Api.dll",
+      "cwd": "${workspaceFolder}/server/ReactDotnetBoilerplate.Api",
+      "launchSettingsProfile": "https",
+      "envFile": "${workspaceFolder}/.env",
+      "stopAtEntry": false,
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "\\bNow listening on:\\s+(https?://\\S+)",
+        "uriFormat": "%s/swagger"
+      }
+    },
+    {
+      "name": "Frontend: Next.js (Chrome)",
+      "type": "chrome",
+      "request": "launch",
+      "preLaunchTask": "client: dev",
+      "url": "http://localhost:3000",
+      "webRoot": "${workspaceFolder}/client"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full stack: API + Next.js",
+      "configurations": ["Backend: API", "Frontend: Next.js (Chrome)"],
+      "stopAll": true
+    }
+  ]
+}

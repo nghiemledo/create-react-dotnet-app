@@ -4,8 +4,9 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DATABASES, SUPPORTED_DATABASES, TEMPLATE_PATHS, type Database } from '../src/databases.js';
 import { CancelledError, CliError } from '../src/errors.js';
+import { FRONTENDS } from '../src/frontends.js';
 import { generateProject, toDestinationPath, type GenerateOptions } from '../src/generate.js';
-import { defaultDatabasesDir, defaultTemplateDir } from '../src/paths.js';
+import { defaultCommonDir, defaultDatabasesDir, defaultFrontendsDir, defaultTemplateDir } from '../src/paths.js';
 import { escapeRegExp } from '../src/text.js';
 import { TEMPLATE_TOKENS } from '../src/tokens.js';
 import { listFiles, makeTempDir, writeFiles, type AppSettings } from './helpers.js';
@@ -320,6 +321,119 @@ describe('generateProject database providers (fixture template)', () => {
       databasesDir: await makeOverlays(),
     });
     await expect(generateProject(opts)).rejects.toThrow(/Unknown documentation block "nope" in README\.md/);
+    expect(existsSync(opts.targetDir)).toBe(false);
+  });
+});
+
+describe('generateProject frontend overlays (fixture template)', () => {
+  async function makeFrontendsDir(files: Record<string, string> = {}): Promise<string> {
+    const frontendsDir = await makeTempDir();
+    await writeFiles(path.join(frontendsDir, 'nextjs'), {
+      'client/package.json': '{ "name": "training-management-client", "scripts": { "dev": "next dev" } }',
+      'client/pnpm-lock.yaml': "lockfileVersion: '9.0'\n",
+      'client/.env.example': 'NEXT_PUBLIC_APP_NAME=Hệ thống quản lý đào tạo\n',
+      'client/_gitignore': '.next/\n.env\n',
+      'client/next.config.ts': 'export default {};\n',
+      'client/src/store/authStore.ts': "persist({ name: 'training-auth' })",
+      '_vscode/launch.json': '{"url":"http://localhost:3000","program":"server/ReactDotnetBoilerplate.Api"}',
+      ...files,
+    });
+    return frontendsDir;
+  }
+
+  async function nextOptions(overrides: Partial<GenerateOptions> = {}): Promise<GenerateOptions> {
+    const commonDir = await makeTempDir();
+    await writeFiles(commonDir, { _gitignore: '.env\n', '_vscode/launch.json': '{"url":"http://localhost:5173"}' });
+    return options({ commonDir, frontendsDir: await makeFrontendsDir(), frontend: 'nextjs', ...overrides });
+  }
+
+  it('replaces the whole template client with the overlay and keeps every other template file', async () => {
+    const opts = await nextOptions();
+    await generateProject(opts);
+
+    expect(await listFiles(opts.targetDir)).toEqual([
+      '.gitignore',
+      '.vscode/launch.json',
+      'client/.env',
+      'client/.env.example',
+      'client/.gitignore',
+      'client/next.config.ts',
+      'client/package.json',
+      'client/pnpm-lock.yaml',
+      'client/src/store/authStore.ts',
+      'server/.gitignore',
+      'server/MyApp.Api/appsettings.json',
+      'server/MyApp.Infrastructure/DataSeeder.cs',
+      'server/MyApp.sln',
+    ]);
+    const read = (p: string) => fs.readFile(path.join(opts.targetDir, p), 'utf8');
+    expect(await read('client/.env')).toBe('NEXT_PUBLIC_APP_NAME=My App\n');
+    expect(await read('client/package.json')).toContain('"my-app-client"');
+    expect(await read('client/src/store/authStore.ts')).toBe("persist({ name: 'my-app-auth' })");
+    expect(await read('.vscode/launch.json')).toBe('{"url":"http://localhost:3000","program":"server/MyApp.Api"}');
+    expect(await read('server/MyApp.Api/appsettings.json')).toContain(secrets.jwtSigningKey);
+  });
+
+  it('drops the overlay lockfile when npm is selected', async () => {
+    const opts = await nextOptions({ packageManager: 'npm' });
+    await generateProject(opts);
+    const files = await listFiles(opts.targetDir);
+    expect(files).not.toContain('client/pnpm-lock.yaml');
+    expect(files).toContain('client/next.config.ts');
+  });
+
+  it('does not need the frontend overlays for the default React + Vite client', async () => {
+    const opts = await options({ frontendsDir: path.join(await makeTempDir(), 'missing') });
+    await generateProject(opts);
+    expect(await listFiles(opts.targetDir)).toContain('client/src/assets/logo.png');
+  });
+
+  it('explains a missing Next.js overlay instead of generating a project without a client', async () => {
+    const opts = await nextOptions({ frontendsDir: await makeTempDir() });
+    await expect(generateProject(opts)).rejects.toThrow(/Next\.js files are missing from this installation/);
+    expect(existsSync(opts.targetDir)).toBe(false);
+  });
+
+  it('renders frontend documentation blocks for the selected frontend', async () => {
+    const readme = [
+      '# App',
+      'Frontend: <!-- crda:frontend-summary -->React + Vite<!-- /crda:frontend-summary --> + Query.',
+      '<!-- crda:frontend-stack -->',
+      '> React',
+      '> Vite',
+      '<!-- /crda:frontend-stack -->',
+      'End.',
+      '',
+    ].join('\n');
+    const nextReadme = '# Next\n<!-- crda:source-repo-only -->\nOnly in the source repository.\n<!-- /crda:source-repo-only -->\nEnd.\n';
+    const generate = async (frontend: 'vite' | 'nextjs') => {
+      const opts = await nextOptions({
+        frontend,
+        templateDir: await makeFixtureTemplate({ 'README.md': readme }),
+        frontendsDir: await makeFrontendsDir({ 'client/README.md': nextReadme }),
+      });
+      await generateProject(opts);
+      return opts.targetDir;
+    };
+
+    const vite = await generate('vite');
+    expect(await fs.readFile(path.join(vite, 'README.md'), 'utf8')).toBe(
+      '# App\nFrontend: React + Vite + Query.\n> React\n> Vite\nEnd.\n',
+    );
+    const next = await generate('nextjs');
+    expect(await fs.readFile(path.join(next, 'README.md'), 'utf8')).toBe(
+      '# App\nFrontend: React + Next.js + Query.\n> React\n> Next.js (App Router)\nEnd.\n',
+    );
+    expect(await fs.readFile(path.join(next, 'client/README.md'), 'utf8')).toBe('# Next\nEnd.\n');
+  });
+
+  it('stops before writing anything when a frontend documentation block no longer matches', async () => {
+    const opts = await nextOptions({
+      templateDir: await makeFixtureTemplate({
+        'README.md': '<!-- crda:frontend-stack -->\n> Webpack\n<!-- /crda:frontend-stack -->\n',
+      }),
+    });
+    await expect(generateProject(opts)).rejects.toThrow(/"frontend-stack" no longer contains "> Vite" exactly once/);
     expect(existsSync(opts.targetDir)).toBe(false);
   });
 });
@@ -773,3 +887,181 @@ describe.skipIf(!existsSync(defaultTemplateDir)).each(SUPPORTED_DATABASES)('gene
     }
   });
 });
+
+interface Launch {
+  configurations: { name: string; type: string; url?: string; webRoot?: string }[];
+  compounds: { name: string; configurations: string[] }[];
+}
+
+describe.skipIf(!existsSync(path.join(defaultFrontendsDir, 'nextjs')))('Next.js frontend overlay', () => {
+  const readJson = async <T>(file: string) => JSON.parse(await fs.readFile(file, 'utf8')) as T;
+  interface Tasks { tasks: { label: string; problemMatcher?: unknown }[] }
+
+  it('changes only the frontend entries of the shared VS Code configuration', async () => {
+    const common = path.join(defaultCommonDir, '_vscode');
+    const next = path.join(defaultFrontendsDir, 'nextjs', '_vscode');
+    const [commonLaunch, nextLaunch] = await Promise.all([readJson<Launch>(path.join(common, 'launch.json')), readJson<Launch>(path.join(next, 'launch.json'))]);
+    expect(nextLaunch.configurations.filter((c) => c.type !== 'chrome')).toEqual(commonLaunch.configurations.filter((c) => c.type !== 'chrome'));
+    expect(nextLaunch.configurations.find((c) => c.type === 'chrome')).toMatchObject({
+      name: FRONTENDS.nextjs.vscode.launch,
+      url: FRONTENDS.nextjs.devServerUrl,
+      webRoot: '${workspaceFolder}/client',
+    });
+    expect(nextLaunch.compounds).toEqual([
+      { name: FRONTENDS.nextjs.vscode.compound, configurations: ['Backend: API', FRONTENDS.nextjs.vscode.launch], stopAll: true },
+    ]);
+    expect(commonLaunch.compounds[0]?.name).toBe(FRONTENDS.vite.vscode.compound);
+
+    const [commonTasks, nextTasks] = await Promise.all([readJson<Tasks>(path.join(common, 'tasks.json')), readJson<Tasks>(path.join(next, 'tasks.json'))]);
+    const withoutDevServer = (tasks: Tasks) => tasks.tasks.filter((t) => t.label !== 'client: dev');
+    expect(withoutDevServer(nextTasks)).toEqual(withoutDevServer(commonTasks));
+    expect(JSON.stringify(nextTasks.tasks.find((t) => t.label === 'client: dev'))).toContain('Ready in');
+  });
+});
+
+describe.skipIf(!existsSync(path.join(defaultFrontendsDir, 'nextjs'))).each(SUPPORTED_DATABASES)(
+  'generateProject (bundled template, Next.js, %s)',
+  (database) => {
+    async function generateBundled(frontend: 'vite' | 'nextjs', packageManager: 'pnpm' | 'npm' = 'pnpm') {
+      const targetDir = path.join(await makeTempDir(), 'school-portal');
+      await generateProject({
+        templateDir: defaultTemplateDir,
+        targetDir,
+        projectName: 'school-portal',
+        displayName: 'School Portal',
+        packageManager,
+        database,
+        frontend,
+        secrets,
+      });
+      return { targetDir, files: await listFiles(targetDir) };
+    }
+    const readText = (targetDir: string, file: string) => fs.readFile(path.join(targetDir, file), 'utf8');
+    const FRONTEND_DOCS = ['README.md', 'CRUD_FLOW_GUIDE.md', '.vscode/launch.json', '.vscode/tasks.json'];
+
+    it('shares the backend, database files and editor setup byte for byte with the React + Vite project', async () => {
+      const [vite, next] = await Promise.all([generateBundled('vite'), generateBundled('nextjs')]);
+      const outsideClient = (files: string[]) => files.filter((f) => !f.startsWith('client/'));
+      expect(outsideClient(next.files)).toEqual(outsideClient(vite.files));
+      for (const file of outsideClient(next.files).filter((f) => !FRONTEND_DOCS.includes(f))) {
+        const [a, b] = await Promise.all([fs.readFile(path.join(vite.targetDir, file)), fs.readFile(path.join(next.targetDir, file))]);
+        expect(b.equals(a), file).toBe(true);
+      }
+      expect(next.files).toEqual(expect.arrayContaining(['compose.yaml', '.env', '.env.example', '.gitignore', 'server/SchoolPortal.sln']));
+    });
+
+    it('contains the Next.js client only', async () => {
+      const { files } = await generateBundled('nextjs');
+      expect(files).toEqual(
+        expect.arrayContaining([
+          'client/next.config.ts',
+          'client/package.json',
+          'client/pnpm-lock.yaml',
+          'client/.env',
+          'client/.env.example',
+          'client/.gitignore',
+          'client/src/app/layout.tsx',
+          'client/src/app/(main)/students/[id]/page.tsx',
+          'client/src/app/(main)/students/create/page.tsx',
+          'client/src/features/students/views/StudentListView.tsx',
+        ]),
+      );
+      for (const viteOnly of ['client/vite.config.ts', 'client/index.html', 'client/src/main.tsx', 'client/src/routes/AppRoutes.tsx']) {
+        expect(files).not.toContain(viteOnly);
+      }
+      expect(files.some((f) => f.startsWith('client/src/pages/'))).toBe(false);
+      expect(files.some((f) => /(^|\/)(_gitignore|_env|_vscode)(\/|$)|\.next\/|next-env\.d\.ts|\.tsbuildinfo$/.test(f))).toBe(false);
+    });
+
+    it('drops the pnpm lockfile for npm', async () => {
+      const { files } = await generateBundled('nextjs', 'npm');
+      expect(files).not.toContain('client/pnpm-lock.yaml');
+      expect(files).toContain('client/package.json');
+    });
+
+    it('creates a browser-only client .env with no secrets and keeps it git-ignored', async () => {
+      const { targetDir } = await generateBundled('nextjs');
+      const env = await readText(targetDir, 'client/.env');
+      const example = await readText(targetDir, 'client/.env.example');
+      expect(env).toBe(example);
+      const variables = [...env.matchAll(/^([A-Z_]+)=(.*)$/gm)].map((m) => [m[1]!, m[2]!] as const);
+      expect(Object.fromEntries(variables)).toEqual({
+        NEXT_PUBLIC_APP_NAME: 'School Portal',
+        NEXT_PUBLIC_API_BASE_URL: 'https://localhost:7001',
+        NEXT_PUBLIC_API_TIMEOUT: '15000',
+      });
+      for (const secret of Object.values(secrets)) expect(env).not.toContain(secret);
+      expect(variables.some(([name]) => /SECRET|PASSWORD|TOKEN|KEY/.test(name))).toBe(false);
+
+      const clientIgnore = (await readText(targetDir, 'client/.gitignore')).split(/\r?\n/);
+      expect(clientIgnore).toEqual(expect.arrayContaining(['.env', '.next/', 'next-env.d.ts', 'node_modules/']));
+      expect((await readText(targetDir, '.gitignore')).split(/\r?\n/)).toContain('.env');
+    });
+
+    it('documents the Next.js client instead of Vite', async () => {
+      const { targetDir, files } = await generateBundled('nextjs');
+      for (const doc of files.filter((f) => f.endsWith('.md'))) {
+        const text = await readText(targetDir, doc);
+        expect(text, doc).not.toContain('crda:');
+        expect(text, doc).not.toMatch(/\bVite\b|VITE_|5173|client-next|AppRoutes\.tsx|client\/src\/pages\//);
+      }
+      const readme = await readText(targetDir, 'README.md');
+      expect(readme).toContain('React 19 + TypeScript + Next.js + TanStack Query');
+      expect(readme).toContain('Mã nguồn Frontend (Next.js App Router + TypeScript)');
+      expect(readme).toContain('### 3. Chạy Frontend (Client Next.js)');
+      expect(readme).toContain('NEXT_PUBLIC_API_BASE_URL=https://localhost:7001');
+      expect(readme).toContain('NEXT_PUBLIC_APP_NAME=School Portal');
+      expect(readme).toContain('[http://localhost:3000](http://localhost:3000)');
+      expect(readme).toContain('`Frontend: Next.js (Chrome)` starts the Next.js dev server');
+      expect(readme).toContain('expects Next.js on its default port 3000');
+      expect(readme).toContain(`### Database: ${DATABASES[database].name}`);
+      const guide = await readText(targetDir, 'CRUD_FLOW_GUIDE.md');
+      expect(guide).toContain('## 5. Các Bước Triển Khai Frontend (Client Next.js)');
+      expect(guide).toContain('client/src/features/students/');
+      expect(guide).toContain('4. **Viết React Query Hooks');
+      expect(guide).toContain('// src/app/(main)/students/create/page.tsx');
+      const clientReadme = await readText(targetDir, 'client/README.md');
+      expect(clientReadme).toContain('# Next.js client');
+      expect(clientReadme).not.toContain('Shared code with the Vite client');
+    });
+
+    it('points VS Code at the Next.js dev server', async () => {
+      const { targetDir } = await generateBundled('nextjs');
+      const launch = JSON.parse(await readText(targetDir, '.vscode/launch.json')) as Launch;
+      expect(launch.configurations.find((c) => c.type === 'chrome')).toMatchObject({ url: 'http://localhost:3000' });
+      expect(launch.compounds.map((c) => c.name)).toEqual(['Full stack: API + Next.js']);
+      const tasks = JSON.parse(await readText(targetDir, '.vscode/tasks.json')) as { tasks: { label: string; script?: string }[] };
+      const clientPackage = JSON.parse(await readText(targetDir, 'client/package.json')) as { scripts: Record<string, string> };
+      for (const task of tasks.tasks.filter((t) => t.script)) expect(clientPackage.scripts[task.script!], task.label).toBeDefined();
+      expect(clientPackage.scripts.dev).toBe('next dev');
+    });
+
+    it('uses the same codegen script and generated API types as the React + Vite client', async () => {
+      const [vite, next] = await Promise.all([generateBundled('vite'), generateBundled('nextjs')]);
+      for (const file of ['client/scripts/codegen.mjs', 'client/scripts/codegen.test.mjs', 'client/src/types/api.generated.ts']) {
+        expect(await readText(next.targetDir, file), file).toBe(await readText(vite.targetDir, file));
+      }
+      const clientPackage = JSON.parse(await readText(next.targetDir, 'client/package.json')) as {
+        scripts: Record<string, string>;
+        devDependencies: Record<string, string>;
+      };
+      expect(clientPackage.scripts.codegen).toBe('node scripts/codegen.mjs');
+      expect(clientPackage.scripts['codegen:test']).toBe('node --test scripts/codegen.test.mjs');
+      expect(clientPackage.devDependencies['openapi-typescript']).toMatch(/^7\.\d+\.\d+$/);
+      expect(await readText(next.targetDir, 'client/eslint.config.mjs')).toContain("'src/types/api.generated.ts'");
+    });
+
+    it('produces a fully renamed project with no template tokens or source identifiers', async () => {
+      const { targetDir, files } = await generateBundled('nextjs');
+      const forbidden = ['ReactDotnetBoilerplate', 'training-management-client', "'training-", 'Hệ thống quản lý đào tạo', ...Object.values(TEMPLATE_TOKENS)];
+      for (const file of files) {
+        const content = await fs.readFile(path.join(targetDir, file));
+        if (content.subarray(0, 8000).includes(0)) continue;
+        const text = content.toString('utf8');
+        for (const value of forbidden) expect(text.includes(value), `${file} still contains ${value}`).toBe(false);
+      }
+      expect((JSON.parse(await readText(targetDir, 'client/package.json')) as { name: string }).name).toBe('school-portal-client');
+      expect(await readText(targetDir, 'client/src/store/authStore.ts')).toContain("name: 'school-portal-auth'");
+    });
+  },
+);

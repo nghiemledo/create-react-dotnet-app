@@ -10,3 +10,5 @@ export const defaultTemplateDir = path.join(packageRoot, 'templates', 'default')
 export const defaultDatabasesDir = path.join(packageRoot, 'templates', 'databases');
 /** Files added to every generated project regardless of database (editor configuration, root .gitignore). */
 export const defaultCommonDir = path.join(packageRoot, 'templates', 'common');
+/** Frontend overlays (another `client/` and its editor configuration), laid out like the template. */
+export const defaultFrontendsDir = path.join(packageRoot, 'templates', 'frontends');

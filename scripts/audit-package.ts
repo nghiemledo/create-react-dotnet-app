@@ -2,17 +2,21 @@
  * Pre-release audit of a packed tarball (extracted to <dir>/package).
  *
  *   tsx scripts/audit-package.ts --extracted <dir>/package --source <path-to-react-dotnet-boilerplate> [--ref HEAD]
+ *   tsx scripts/audit-package.ts --extracted <dir>/package --source <path-to-react-dotnet-boilerplate> --worktree
  *
+ * --worktree compares against the source working tree (see sync-template --worktree). Such a template is not
+ * reproducible from a commit, so the provenance check always fails it.
  * Prints file paths and pass/fail only; secret values are never printed.
  */
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { DATABASES, TEMPLATE_PATHS } from '../src/databases.js';
-import { defaultCommonDir, defaultDatabasesDir } from '../src/paths.js';
+import { FRONTENDS } from '../src/frontends.js';
+import { defaultCommonDir, defaultDatabasesDir, defaultFrontendsDir, packageRoot } from '../src/paths.js';
 import { isBinary } from '../src/text.js';
-import { discoverSecrets, isExcluded, SOURCE_PATHS, templatePathFor } from './template-rules.js';
+import { readCommit, readWorktree } from './source-files.js';
+import { discoverSecrets, isExcluded, packagedPathFor, SOURCE_PATHS } from './template-rules.js';
 
 const FORBIDDEN: [string, RegExp][] = [
   ['.env file', /(^|\/)\.env(\.(?!example$)[^/]+)?$/],
@@ -24,11 +28,15 @@ const FORBIDDEN: [string, RegExp][] = [
   ['certificate/key', /\.(pfx|p12|pem|key|snk)$/i],
   ['log file', /\.log$/i],
   ['npm credentials', /(^|\/)\.npmrc$/],
-  ['build output', /^templates\/(default|databases\/[^/]+)\/client\/dist\//],
+  ['build output', /^templates\/(default|databases\/[^/]+|frontends\/[^/]+)\/client\/(dist|\.next|out)\//],
+  ['Next.js or TypeScript generated file', /(^|\/)next-env\.d\.ts$|\.tsbuildinfo$/],
   ['dev-only source', /^(src|tests|scripts)\//],
-  ['sync staging', /^templates\/\.sync-/],
+  ['sync staging', /^templates\/(frontends\/)?\.sync-/],
   ['stored .env outside the database overlays', /^(?!templates\/databases\/[^/]+\/_env$).*(^|\/)_env$/],
-  ['stored .vscode outside the common overlay', /^(?!templates\/common\/_vscode\/).*(^|\/)_vscode\//],
+  [
+    'stored .vscode outside the common and frontend overlays',
+    /^(?!templates\/(common|frontends\/[^/]+)\/_vscode\/).*(^|\/)_vscode\//,
+  ],
   ['uploaded user file', /wwwroot\/uploads\/.+(?<!\.gitkeep)$/],
 ];
 
@@ -50,11 +58,19 @@ async function walk(root: string, dir = ''): Promise<string[]> {
 
 async function main(): Promise<void> {
   const { values } = parseArgs({
-    options: { extracted: { type: 'string' }, source: { type: 'string' }, ref: { type: 'string', default: 'HEAD' } },
+    options: {
+      extracted: { type: 'string' },
+      source: { type: 'string' },
+      ref: { type: 'string' },
+      worktree: { type: 'boolean', default: false },
+    },
   });
-  if (!values.extracted || !values.source) throw new Error('Usage: --extracted <dir> --source <repo> [--ref HEAD]');
+  if (!values.extracted || !values.source || (values.worktree && values.ref)) {
+    throw new Error('Usage: --extracted <dir> --source <repo> [--ref HEAD | --worktree]');
+  }
   const root = path.resolve(values.extracted);
-  const git = (...args: string[]) => execFileSync('git', ['-C', path.resolve(values.source!), ...args]);
+  const source = path.resolve(values.source);
+  const snapshot = values.worktree ? readWorktree(source) : readCommit(source, values.ref ?? 'HEAD');
 
   const failures: string[] = [];
   const check = (ok: boolean, message: string) => {
@@ -92,32 +108,56 @@ async function main(): Promise<void> {
   }
   check(true, 'forbidden-path scan completed');
 
+  // Provenance: the template must come from the audited commit, not from uncommitted files.
+  const sourceInfo = JSON.parse(
+    await fs.readFile(path.join(packageRoot, 'templates', 'default.source.json'), 'utf8'),
+  ) as { commit?: string; worktree?: boolean };
+  check(
+    sourceInfo.commit === snapshot.commit && sourceInfo.worktree !== true,
+    `templates were synced from commit ${snapshot.commit}${sourceInfo.worktree ? ' (FAILS: synced from a working tree)' : ''}`,
+  );
+
   // Template completeness against the source repository
-  const commit = git('rev-parse', '--verify', `${values.ref}^{commit}`).toString().trim();
-  const tracked = git('ls-tree', '-r', '-z', '--name-only', commit).toString().split('\0').filter(Boolean);
-  const expected = tracked.filter((p) => !isExcluded(p)).map((p) => `templates/default/${templatePathFor(p)}`);
+  const syncedPrefixes = [
+    'templates/default/',
+    ...Object.values(FRONTENDS).flatMap((info) => (info.overlay ? [`templates/frontends/${info.overlay}/client/`] : [])),
+  ];
+  const expected = [...snapshot.files.keys()].filter((p) => !isExcluded(p)).map(packagedPathFor);
   const missing = expected.filter((p) => !files.includes(p));
-  const unexpected = files.filter((f) => f.startsWith('templates/default/') && !expected.includes(f));
+  const unexpected = files.filter((f) => syncedPrefixes.some((prefix) => f.startsWith(prefix)) && !expected.includes(f));
   check(missing.length === 0, `all ${expected.length} distributable source files are present${missing.length ? `; missing: ${missing.join(', ')}` : ''}`);
   check(unexpected.length === 0, `no template files beyond the source repository${unexpected.length ? `: ${unexpected.join(', ')}` : ''}`);
-  for (const hidden of ['client/.env.example', 'client/_gitignore', 'server/_gitignore']) {
-    check(files.includes(`templates/default/${hidden}`), `hidden template file present: ${hidden}`);
+  const hiddenFiles = [
+    ...['client/.env.example', 'client/_gitignore', 'server/_gitignore'].map((f) => `templates/default/${f}`),
+    ...Object.values(FRONTENDS).flatMap((info) =>
+      info.overlay ? ['client/.env.example', 'client/_gitignore'].map((f) => `templates/frontends/${info.overlay}/${f}`) : [],
+    ),
+  ];
+  for (const hidden of hiddenFiles) {
+    check(files.includes(hidden), `hidden template file present: ${hidden}`);
   }
   check(
     files.some((f) => f.endsWith('wwwroot/uploads/users/.gitkeep')),
     'hidden template file present: wwwroot/uploads/users/.gitkeep',
   );
 
-  // Overlays: exactly the files in this repository's templates/databases and templates/common
+  // Overlays: exactly the files in this repository's templates/databases, templates/common and templates/frontends
   const overlayExpected = [
     ...(await walk(defaultDatabasesDir)).map((f) => `templates/databases/${f}`),
     ...(await walk(defaultCommonDir)).map((f) => `templates/common/${f}`),
+    ...(await walk(defaultFrontendsDir)).map((f) => `templates/frontends/${f}`),
   ];
-  const overlayPackaged = files.filter((f) => f.startsWith('templates/databases/') || f.startsWith('templates/common/'));
+  const overlayPackaged = files.filter((f) => /^templates\/(databases|common|frontends)\//.test(f));
   const overlayMissing = overlayExpected.filter((f) => !files.includes(f));
   const overlayExtra = overlayPackaged.filter((f) => !overlayExpected.includes(f));
-  check(overlayMissing.length === 0, `all ${overlayExpected.length} database overlay files are present${overlayMissing.length ? `; missing: ${overlayMissing.join(', ')}` : ''}`);
-  check(overlayExtra.length === 0, `no unexpected database overlay files${overlayExtra.length ? `: ${overlayExtra.join(', ')}` : ''}`);
+  check(overlayMissing.length === 0, `all ${overlayExpected.length} overlay files are present${overlayMissing.length ? `; missing: ${overlayMissing.join(', ')}` : ''}`);
+  check(overlayExtra.length === 0, `no unexpected overlay files${overlayExtra.length ? `: ${overlayExtra.join(', ')}` : ''}`);
+  for (const info of Object.values(FRONTENDS)) {
+    if (!info.overlay) continue;
+    for (const file of ['_vscode/launch.json', '_vscode/tasks.json', 'client/package.json']) {
+      check(files.includes(`templates/frontends/${info.overlay}/${file}`), `${info.name} overlay ships ${file}`);
+    }
+  }
   for (const [database, info] of Object.entries(DATABASES)) {
     if (info.replacesPrefix !== TEMPLATE_PATHS.migrations) continue;
     const migrations = `templates/databases/${info.overlay}/${TEMPLATE_PATHS.migrations}`;
@@ -141,7 +181,11 @@ async function main(): Promise<void> {
   }
 
   // Secrets: original source values must not appear anywhere in the package
-  const show = (p: string) => git('show', `${commit}:${p}`).toString('utf8');
+  const show = (p: string) => {
+    const content = snapshot.files.get(p);
+    if (!content) throw new Error(`${p} is missing from the source.`);
+    return content.toString('utf8');
+  };
   const secrets = discoverSecrets(show(SOURCE_PATHS.appsettings), show(SOURCE_PATHS.dataSeeder));
   const secretValues = [...secrets.jwtSigningKeys, ...secrets.seedUserPasswords];
   let leaked = 0;

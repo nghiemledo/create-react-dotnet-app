@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { Database } from './databases.js';
 import { displayPath } from './display.js';
+import { DEFAULT_FRONTEND, FRONTENDS, type Frontend } from './frontends.js';
 import { log } from './log.js';
 import { PACKAGE_MANAGERS, type PackageManager } from './package-managers.js';
 import type { StepResult, StepStatus } from './steps.js';
@@ -65,6 +66,8 @@ export function printSummary(steps: StepResult[], projectName: string): void {
 export interface NextStepsContext {
   targetDir: string;
   pascalName: string;
+  /** Defaults to React + Vite. */
+  frontend?: Frontend;
   database: Database;
   packageManager: PackageManager;
   dependenciesInstalled: boolean;
@@ -75,6 +78,7 @@ export interface NextStepsContext {
 export function nextStepLines(context: NextStepsContext, style: Style = PLAIN): string[] {
   const { targetDir, pascalName, database, packageManager, dependenciesInstalled, dotnetSdkFound } = context;
   const pm = PACKAGE_MANAGERS[packageManager];
+  const frontend = FRONTENDS[context.frontend ?? DEFAULT_FRONTEND];
   const step = (number: number, title: string, detail: string) => `  ${style.title(`${number}. ${title}`)} ${detail}`;
   const command = (text: string, comment?: string) =>
     `       ${style.command(text)}${comment ? `   ${style.comment(`# ${comment}`)}` : ''}`;
@@ -91,12 +95,12 @@ export function nextStepLines(context: NextStepsContext, style: Style = PLAIN): 
     command('dotnet dev-certs https --trust', 'first time only'),
     command(`dotnet run --project ${pascalName}.Api --launch-profile https`),
     '',
-    step(3, 'Start the frontend:', 'Vite dev server at http://localhost:5173'),
+    step(3, 'Start the frontend:', `${frontend.tool} dev server at ${frontend.devServerUrl}`),
     command(`cd ${displayPath(path.join(targetDir, 'client'))}`),
     ...(dependenciesInstalled ? [] : [command(`${packageManager} ${pm.installArgs.join(' ')}`)]),
     command(pm.devCommand),
     '',
-    `  ${style.note('Prefer VS Code? Open the project folder and run "Full stack: API + Vite" from Run and Debug.')}`,
+    `  ${style.note(`Prefer VS Code? Open the project folder and run "${frontend.vscode.compound}" from Run and Debug.`)}`,
     `  ${style.note('In Development the API applies its migrations and seeds sample data on startup.')}`,
     `  ${style.note('This tool does not run migrations or touch any database. Database setup details are in README.md.')}`,
     '',
