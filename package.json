@@ -1,6 +1,6 @@
 {
   "name": "create-react-dotnet-app",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Scaffold a full-stack React + ASP.NET Core (.NET 9) project from a bundled template.",
   "license": "MIT",
   "author": "Nghiem Le <nghiemledo@gmail.com>",
